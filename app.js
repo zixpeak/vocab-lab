@@ -48,6 +48,11 @@
     current: null,
     rating: null,
     ratingSnapshot: null,
+    round: null,
+    lastAnswerCorrect: null,
+    history: [],
+    currentSnapshot: null,
+    currentSnapshotPushed: false,
     sessionWrong: new Set(),
     sessionLabel: '',
     startTime: 0,
@@ -417,6 +422,117 @@
     return shuffle(buildQueue());
   }
 
+  function cloneProgressState(source) {
+    return {
+      wrong: { ...source.wrong },
+      mastered: { ...source.mastered },
+      hard: { ...source.hard },
+      slashed: { ...source.slashed }
+    };
+  }
+
+  function cloneRoundState(round) {
+    if (!round) return null;
+    const copy = new Map();
+    round.forEach((entry, key) => {
+      copy.set(key, {
+        word: entry.word,
+        streak: entry.streak,
+        done: entry.done
+      });
+    });
+    return copy;
+  }
+
+  function captureSessionSnapshot(question) {
+    return {
+      queue: state.queue.slice(),
+      qIndex: state.qIndex,
+      score: state.score,
+      attempted: state.attempted,
+      sessionWrong: Array.from(state.sessionWrong),
+      round: cloneRoundState(state.round),
+      progress: cloneProgressState(progress),
+      question
+    };
+  }
+
+  function restoreSessionSnapshot(snapshot) {
+    state.queue = snapshot.queue.slice();
+    state.qIndex = snapshot.qIndex;
+    state.score = snapshot.score;
+    state.attempted = snapshot.attempted;
+    state.sessionWrong = new Set(snapshot.sessionWrong);
+    state.round = cloneRoundState(snapshot.round);
+    progress = cloneProgressState(snapshot.progress);
+    state.finished = false;
+    state.finishWasSpeed = false;
+    state.isEmpty = false;
+    state.answered = false;
+    state.current = null;
+    state.rating = null;
+    state.ratingSnapshot = null;
+    state.lastAnswerCorrect = null;
+    state.currentSnapshot = null;
+    state.currentSnapshotPushed = false;
+    saveProgress();
+  }
+
+  function rememberCurrentQuestion() {
+    if (state.mode !== 'normal' || state.currentSnapshotPushed || !state.currentSnapshot) return;
+    state.history.push(state.currentSnapshot);
+    state.currentSnapshotPushed = true;
+    updatePrevButton();
+  }
+
+  function updatePrevButton() {
+    const enabled = state.mode === 'normal' && !state.isEmpty && state.history.length > 0;
+    if (els.btnPrev) els.btnPrev.disabled = !enabled;
+  }
+
+  function updateRuleBar() {
+    if (!els.ruleBar) return;
+    els.ruleBar.hidden = !(state.mode === 'normal' && !state.finished && !state.isEmpty);
+  }
+
+  function goToPreviousQuestion() {
+    if (state.mode !== 'normal' || !state.history.length) return;
+    clearSpeedTimer();
+    const snapshot = state.history.pop();
+    restoreSessionSnapshot(snapshot);
+    showQuizView();
+    syncControls();
+    showQuestion(snapshot.question);
+    updatePrevButton();
+  }
+
+  function allRoundDone() {
+    return !!state.round && Array.from(state.round.values()).every(entry => entry.done);
+  }
+
+  function requeueWord(word) {
+    if (!state.round || !state.round.has(word.key)) return;
+    for (let i = state.qIndex + 1; i < state.queue.length; i++) {
+      if (state.queue[i].key === word.key) return;
+    }
+    state.queue.push(word);
+  }
+
+  function removePendingWord(key) {
+    for (let i = state.queue.length - 1; i > state.qIndex; i--) {
+      if (state.queue[i].key === key) state.queue.splice(i, 1);
+    }
+  }
+
+  function doneRoundCount() {
+    if (!state.round) return 0;
+    let count = 0;
+    state.round.forEach(entry => {
+      if (entry.done) count++;
+    });
+    return count;
+  }
+
   /* =========================================================
      存档
      ========================================================= */
@@ -442,7 +558,7 @@
       'brandSub', 'btnFontMinus', 'btnFontPlus', 'btnTheme', 'btnSound', 'btnExample',
       'btnBrowse', 'btnWrongBook', 'btnSpeed', 'btnSpeedHelp', 'btnSettings', 'unitChips', 'btnAddUnit',
       'directionSelect', 'scopeSelect', 'poolNote', 'scoreLabel', 'remainingLabel',
-      'accuracyLabel', 'timeLabel', 'progressFill', 'quizView', 'wordCard', 'questionTag',
+      'accuracyLabel', 'timeLabel', 'progressFill', 'ruleBar', 'btnRuleHelp', 'quizView', 'wordCard', 'questionTag',
       'btnHard', 'btnSlash', 'wordDisplay', 'synDisplay', 'btnSpeak', 'wordMeta', 'exampleDisplay',
       'exampleCnDisplay', 'stageHint', 'optionsGrid', 'listenPanel', 'answerInput',
       'btnReplay', 'btnSubmitAnswer', 'inputFeedback', 'resultPanel', 'resultMark',
@@ -454,7 +570,7 @@
       'flipCard', 'cardFrontWord', 'cardFrontPos', 'btnCardSpeak', 'cardBackCh',
       'cardBackSyn', 'cardBackEx', 'cardBackExCn', 'cardRate', 'btnCardForgot',
       'btnCardKnown', 'cardDone', 'cardDoneStats', 'btnCardAgain', 'btnCardReviewForgot',
-      'btnCardExit', 'footer', 'shortcutHint', 'btnRestart', 'modalOverlay', 'modalTitle',
+      'btnCardExit', 'footer', 'shortcutHint', 'btnPrev', 'btnRestart', 'modalOverlay', 'modalTitle',
       'modalBody', 'modalClose', 'confirmOverlay', 'confirmTitle', 'confirmText',
       'confirmOk', 'confirmCancel', 'toastWrap', 'importFile'
     ].forEach(id => {
@@ -576,11 +692,12 @@
   }
 
   function updateExampleBtn() {
-    els.btnExample.innerHTML = `${settings.hideExamples ? '🚫' : '📄'} <span>例句</span>`;
+    els.btnExample.innerHTML = `${settings.hideExamples ? '🚫' : '💡'} <span>提示</span>`;
     els.btnExample.classList.toggle('active', settings.hideExamples);
     els.btnExample.title = settings.hideExamples
-      ? '答题时已隐藏例句（点击恢复）'
-      : '答题时显示例句（点击隐藏）';
+      ? '答题时已隐藏 synonym 和例句（点击恢复）'
+      : '答题时显示 synonym 和例句（点击隐藏）';
+    els.btnExample.setAttribute('aria-label', els.btnExample.title);
   }
 
   function syncControls() {
@@ -611,9 +728,11 @@
     document.body.classList.toggle('speed-mode', speed);
     document.body.classList.toggle('cards-mode', cards);
 
+    updateRuleBar();
     updateSoundBtn();
     updateThemeBtn();
     updateExampleBtn();
+    updatePrevButton();
   }
 
   function adjustFont(delta) {
@@ -640,14 +759,14 @@
   function updateStats() {
     const scoreCaption = els.scoreLabel.nextElementSibling;
     if (scoreCaption) {
-      scoreCaption.textContent = state.mode === 'cards' ? '记住' : '答对';
+      scoreCaption.textContent = state.mode === 'cards' ? '学会' : '答对';
     }
     if (state.mode === 'cards') {
       const rated = state.cardKnown + state.cardForgot;
       els.scoreLabel.textContent = String(state.cardKnown);
       els.remainingLabel.textContent = String(Math.max(0, state.cardQueue.length - state.cardIndex));
       els.accuracyLabel.textContent = rated ? `${Math.round(state.cardKnown / rated * 100)}%` : '—';
-    } else {
+    } else if (state.mode === 'speed') {
       els.scoreLabel.textContent = String(state.score);
       let remaining = 0;
       if (!state.finished && !state.isEmpty) {
@@ -656,6 +775,17 @@
           state.queue.length - state.qIndex - (state.answered ? 1 : 0)
         );
       }
+      els.remainingLabel.textContent = String(remaining);
+      els.accuracyLabel.textContent = state.attempted
+        ? `${Math.round(state.score / state.attempted * 100)}%`
+        : '—';
+    } else {
+      const total = state.round ? state.round.size : 0;
+      const done = doneRoundCount();
+      const remaining = (state.finished || state.isEmpty)
+        ? 0
+        : Math.max(0, total - done);
+      els.scoreLabel.textContent = String(state.score);
       els.remainingLabel.textContent = String(remaining);
       els.accuracyLabel.textContent = state.attempted
         ? `${Math.round(state.score / state.attempted * 100)}%`
@@ -681,12 +811,17 @@
       percent = state.cardQueue.length
         ? Math.round(state.cardIndex / state.cardQueue.length * 100)
         : 0;
-    } else if (state.queue.length) {
-      const done = Math.min(
-        state.qIndex + (state.answered ? 1 : 0),
-        state.queue.length
-      );
-      percent = Math.round(done / state.queue.length * 100);
+    } else if (state.mode === 'speed') {
+      if (state.queue.length) {
+        const done = Math.min(
+          state.qIndex + (state.answered ? 1 : 0),
+          state.queue.length
+        );
+        percent = Math.round(done / state.queue.length * 100);
+      }
+    } else {
+      const total = state.round ? state.round.size : 0;
+      percent = total ? Math.round(doneRoundCount() / total * 100) : 0;
     }
     if (state.finished && !state.isEmpty) percent = 100;
 
@@ -700,24 +835,29 @@
       els.poolNote.textContent = `🃏 ${state.cardQueue.length} 张卡`;
       return;
     }
-    if (state.queue.length) {
-      els.poolNote.textContent = `本轮 ${state.queue.length} 词${state.sessionLabel ? ` · ${state.sessionLabel}` : ''}`;
-    } else {
-      els.poolNote.textContent = `本范围 ${activeWords().length} 词`;
+    if (state.mode === 'speed') {
+      els.poolNote.textContent = state.queue.length
+        ? `本轮 ${state.queue.length} 词${state.sessionLabel ? ` · ${state.sessionLabel}` : ''}`
+        : `本范围 ${activeWords().length} 词`;
+      return;
     }
+    const total = state.round ? state.round.size : 0;
+    els.poolNote.textContent = total
+      ? `本轮 ${total} 词${state.sessionLabel ? ` · ${state.sessionLabel}` : ''}`
+      : `本范围 ${activeWords().length} 词`;
   }
 
   function updateFooterHint() {
     const kbd = key => `<kbd>${key}</kbd>`;
     let hint;
     if (state.mode === 'cards') {
-      hint = `空格 / 点击翻面 · ${kbd('1')} 没记住 · ${kbd('2')} 记住了 · ${kbd('S')} 发音`;
+      hint = `空格 / 点击翻面 · ${kbd('1')} 没记住 · ${kbd('2')} 学会了 · ${kbd('S')} 发音`;
     } else if (state.mode === 'speed') {
       hint = `⚡ 速通中：${kbd('1')}–${kbd('4')} 选择 · 答完自动下一题 · ${kbd('S')} 发音`;
     } else if (settings.direction === 'listen') {
-      hint = `输入答案后按 ${kbd('Enter')} 提交 · ${kbd('S')} 重听发音`;
+      hint = `输入答案后按 ${kbd('Enter')} 提交 · ${kbd('←')} 上一题 · ${kbd('S')} 重听发音`;
     } else {
-      hint = `快捷键：${kbd('1')}–${kbd('4')} 选择 · ${kbd('Enter')} 下一题 · ${kbd('S')} 发音 · ${kbd('H')} 标记难词`;
+      hint = `快捷键：${kbd('1')}–${kbd('4')} 选择 · ${kbd('Enter')} 下一题 · ${kbd('←')} 上一题 · ${kbd('S')} 发音 · ${kbd('H')} 标记难词`;
     }
     els.shortcutHint.innerHTML = hint;
     els.btnRestart.textContent = state.mode === 'cards'
@@ -805,6 +945,16 @@
 
     state.mode = 'normal';
     state.queue = opts.words ? shuffle(opts.words.slice()) : buildQueue();
+    state.round = new Map();
+    state.queue.forEach(word => {
+      if (!state.round.has(word.key)) {
+        state.round.set(word.key, { word, streak: 0, done: false });
+      }
+    });
+    state.history = [];
+    state.currentSnapshot = null;
+    state.currentSnapshotPushed = false;
+    state.lastAnswerCorrect = null;
     state.qIndex = 0;
     state.score = 0;
     state.attempted = 0;
@@ -859,6 +1009,11 @@
 
     state.mode = 'speed';
     state.queue = speedPool();
+    state.round = null;
+    state.history = [];
+    state.currentSnapshot = null;
+    state.currentSnapshotPushed = false;
+    state.lastAnswerCorrect = null;
     state.qIndex = 0;
     state.score = 0;
     state.attempted = 0;
@@ -907,6 +1062,11 @@
 
     state.mode = 'cards';
     state.cardQueue = shuffle(activeWords().slice());
+    state.round = null;
+    state.history = [];
+    state.currentSnapshot = null;
+    state.currentSnapshotPushed = false;
+    state.lastAnswerCorrect = null;
     state.cardIndex = 0;
     state.cardKnown = 0;
     state.cardForgot = 0;
@@ -1001,7 +1161,7 @@
     return picked;
   }
 
-  function showQuestion() {
+  function showQuestion(restoredQuestion) {
     if (state.mode === 'cards') return;
     clearSpeedTimer();
     blurActive();
@@ -1015,12 +1175,15 @@
       return;
     }
 
-    const word = state.queue[state.qIndex];
-    const question = makeQuestion(word);
+    const word = restoredQuestion ? restoredQuestion.word : state.queue[state.qIndex];
+    const question = restoredQuestion || makeQuestion(word);
     state.current = question;
     state.answered = false;
     state.rating = null;
     state.ratingSnapshot = null;
+    state.lastAnswerCorrect = null;
+    state.currentSnapshot = captureSessionSnapshot(question);
+    state.currentSnapshotPushed = false;
     state.isEmpty = false;
 
     els.wordCard.hidden = false;
@@ -1038,6 +1201,8 @@
     els.btnHard.disabled = false;
     els.btnSlash.disabled = false;
     els.btnSpeak.hidden = false;
+    updatePrevButton();
+    updateRuleBar();
 
     els.questionTag.textContent = state.mode === 'speed'
       ? `⚡ 速通 · ${DIR_LABELS[question.direction]}`
@@ -1233,10 +1398,12 @@
     const buttons = Array.from(els.optionsGrid.querySelectorAll('.option-btn'));
     if (!buttons.length) return;
 
+    rememberCurrentQuestion();
     state.answered = true;
     state.attempted++;
 
     const isCorrect = index === question.correctIndex;
+    state.lastAnswerCorrect = isCorrect;
     buttons.forEach((button, buttonIndex) => {
       button.disabled = true;
       if (buttonIndex === question.correctIndex) button.classList.add('correct');
@@ -1288,8 +1455,10 @@
     const normalized = normalizeAnswer(value);
     const isCorrect = expected.some(answer => normalizeAnswer(answer) === normalized);
 
+    rememberCurrentQuestion();
     state.answered = true;
     state.attempted++;
+    state.lastAnswerCorrect = isCorrect;
     els.answerInput.disabled = true;
     els.btnSubmitAnswer.disabled = true;
     blurActive();
@@ -1336,6 +1505,34 @@
     delete progress.mastered[word.key];
   }
 
+  function updateResultHint() {
+    if (!state.current) return;
+    const word = state.current.word;
+    const entry = state.round ? state.round.get(word.key) : null;
+
+    if (state.rating === 'known') {
+      els.stageHint.className = 'stage-hint good';
+      els.stageHint.textContent = '✓ 已学会，这个词本轮不会再出现';
+      return;
+    }
+    if (state.rating === 'forgot') {
+      els.stageHint.className = 'stage-hint bad';
+      els.stageHint.textContent = '✗ 已加入错题本，本轮后面还会再考';
+      return;
+    }
+
+    if (state.lastAnswerCorrect) {
+      const nextStreak = (entry ? entry.streak : 0) + 1;
+      els.stageHint.className = 'stage-hint good';
+      els.stageHint.textContent = nextStreak >= 2
+        ? '✓ 连续答对 2 次，本轮完成！'
+        : '✓ 答对了，再答对一次就完成本轮';
+    } else {
+      els.stageHint.className = 'stage-hint bad';
+      els.stageHint.textContent = '✗ 答错了，本轮后面还会再考';
+    }
+  }
+
   function revealResult(isCorrect) {
     const question = state.current;
     if (!question) return;
@@ -1363,15 +1560,9 @@
     els.btnKnown.disabled = false;
     els.btnForgot.disabled = false;
 
-    const last = state.qIndex >= state.queue.length - 1;
-    els.btnNext.innerHTML = last
-      ? '查看结果 <kbd>Enter</kbd>'
-      : '下一题 <kbd>Enter</kbd>';
+    els.btnNext.innerHTML = '下一题 <kbd>Enter</kbd>';
 
-    els.stageHint.className = `stage-hint ${isCorrect ? 'good' : 'bad'}`;
-    els.stageHint.textContent = isCorrect
-      ? '✓ 已答对，给自己评一下'
-      : '✗ 已加入错题本，看完解析再继续';
+    updateResultHint();
     els.btnSpeak.hidden = false;
 
     if (window.innerWidth < 760) {
@@ -1388,11 +1579,14 @@
   }
 
   function captureRatingSnapshot(word) {
+    const roundEntry = state.round ? state.round.get(word.key) : null;
     return {
       key: word.key,
       wrong: progress.wrong[word.key],
       mastered: !!progress.mastered[word.key],
-      inSessionWrong: state.sessionWrong.has(word.key)
+      inSessionWrong: state.sessionWrong.has(word.key),
+      roundDone: roundEntry ? roundEntry.done : undefined,
+      roundStreak: roundEntry ? roundEntry.streak : undefined
     };
   }
 
@@ -1404,6 +1598,13 @@
     else delete progress.mastered[snapshot.key];
     if (snapshot.inSessionWrong) state.sessionWrong.add(snapshot.key);
     else state.sessionWrong.delete(snapshot.key);
+    if (state.round && snapshot.roundDone !== undefined) {
+      const entry = state.round.get(snapshot.key);
+      if (entry) {
+        entry.done = snapshot.roundDone;
+        entry.streak = snapshot.roundStreak;
+      }
+    }
   }
 
   function updateRateButtons() {
@@ -1430,6 +1631,9 @@
 
     if (isCancel) {
       updateRateButtons();
+      updateResultHint();
+      updateStats();
+      updateProgress();
       saveProgress();
       toast('已取消评价');
       blurActive();
@@ -1437,31 +1641,83 @@
     }
 
     state.ratingSnapshot = captureRatingSnapshot(word);
+    const roundEntry = state.round ? state.round.get(word.key) : null;
     if (known) {
       delete progress.wrong[word.key];
       progress.mastered[word.key] = true;
       state.sessionWrong.delete(word.key);
-      toast('✓ 已标记为掌握');
+      if (roundEntry) roundEntry.done = true;
+      removePendingWord(word.key);
+      toast('✓ 已学会，本轮不再出现');
     } else {
       if (!progress.wrong[word.key]) progress.wrong[word.key] = 1;
       delete progress.mastered[word.key];
       state.sessionWrong.add(word.key);
-      toast('已加入错题本');
+      if (roundEntry) {
+        roundEntry.streak = 0;
+        roundEntry.done = false;
+      }
+      toast('已加入错题本，本轮还会再考');
     }
     state.rating = wanted;
     saveProgress();
     updateRateButtons();
+    updateResultHint();
+    updateStats();
+    updateProgress();
     blurActive();
   }
 
   function nextQuestion() {
     clearSpeedTimer();
     if (state.mode === 'cards') return;
+
+    if (state.mode === 'normal' && state.current && state.round) {
+      const word = state.current.word;
+      const entry = state.round.get(word.key);
+      if (entry && !entry.done) {
+        if (state.rating === 'forgot') {
+          entry.streak = 0;
+          requeueWord(word);
+        } else if (!state.rating) {
+          if (state.lastAnswerCorrect) {
+            entry.streak += 1;
+            if (entry.streak >= 2) entry.done = true;
+            else requeueWord(word);
+          } else {
+            entry.streak = 0;
+            requeueWord(word);
+          }
+        }
+      }
+    }
+
     state.qIndex++;
     state.answered = false;
     state.current = null;
-    if (state.qIndex >= state.queue.length) finishSession();
-    else showQuestion();
+    state.lastAnswerCorrect = null;
+
+    if (state.mode === 'normal') {
+      if (state.round && allRoundDone()) {
+        finishSession();
+        return;
+      }
+      if (state.qIndex >= state.queue.length) {
+        const undone = state.round
+          ? Array.from(state.round.values()).filter(entry => !entry.done)
+          : [];
+        if (!undone.length) {
+          finishSession();
+          return;
+        }
+        undone.forEach(entry => state.queue.push(entry.word));
+      }
+    } else if (state.qIndex >= state.queue.length) {
+      finishSession();
+      return;
+    }
+
+    showQuestion();
   }
 
   /* =========================================================
@@ -1494,13 +1750,18 @@
     ).then(confirmed => {
       if (!confirmed) return;
       progress.slashed[key] = true;
+      if (state.round) state.round.delete(key);
       saveProgress();
       toast('已隐藏这个词');
 
-      const removeAt = state.queue.findIndex(item => item.key === key);
-      if (removeAt >= 0) state.queue.splice(removeAt, 1);
+      for (let i = state.queue.length - 1; i >= 0; i--) {
+        if (state.queue[i].key === key) {
+          state.queue.splice(i, 1);
+          if (i < state.qIndex) state.qIndex--;
+        }
+      }
 
-      if (!state.queue.length) {
+      if (!state.queue.length || (state.round && state.round.size === 0)) {
         if (state.attempted > 0) finishSession();
         else showEmpty();
         return;
@@ -1510,6 +1771,9 @@
         return;
       }
       state.answered = false;
+      state.lastAnswerCorrect = null;
+      updateStats();
+      updateProgress();
       showQuestion();
     });
   }
@@ -1524,8 +1788,12 @@
       return;
     }
     if (!state.queue.length) {
-      showEmpty();
-      return;
+      if (state.mode === 'normal' && state.attempted > 0) {
+        // 所有词都被斩掉时，仍然给出本轮总结
+      } else {
+        showEmpty();
+        return;
+      }
     }
 
     clearSpeedTimer();
@@ -1686,7 +1954,7 @@
     els.cardBackExCn.hidden = !word.exCn;
 
     els.cardMetaLeft.textContent = `第 ${state.cardIndex + 1} / ${state.cardQueue.length} 张`;
-    els.cardMetaRight.textContent = `记住 ${state.cardKnown} · 没记住 ${state.cardForgot}`;
+    els.cardMetaRight.textContent = `学会 ${state.cardKnown} · 没记住 ${state.cardForgot}`;
 
     updateStats();
     updateProgress();
@@ -1760,7 +2028,7 @@
     const accuracy = rated ? Math.round(state.cardKnown / rated * 100) : 0;
 
     title.textContent = '翻卡完成！';
-    description.textContent = `这一轮记住了 ${state.cardKnown} 张，没记住 ${state.cardForgot} 张。`;
+    description.textContent = `这一轮学会了 ${state.cardKnown} 张，没记住 ${state.cardForgot} 张。`;
     els.cardDoneStats.textContent = `正确率 ${accuracy}% · 用时 ${formatTime(state.elapsedMs)}`;
 
     els.btnCardAgain.hidden = false;
@@ -1768,7 +2036,7 @@
     els.btnCardExit.hidden = false;
 
     els.cardMetaLeft.textContent = `共 ${state.cardQueue.length} 张`;
-    els.cardMetaRight.textContent = `记住 ${state.cardKnown} · 没记住 ${state.cardForgot}`;
+    els.cardMetaRight.textContent = `学会 ${state.cardKnown} · 没记住 ${state.cardForgot}`;
 
     updateStats();
     updateProgress();
@@ -1802,7 +2070,7 @@
     els.btnCardExit.hidden = false;
 
     els.cardMetaLeft.textContent = '0 张卡';
-    els.cardMetaRight.textContent = '记住 0 · 没记住 0';
+    els.cardMetaRight.textContent = '学会 0 · 没记住 0';
 
     updateStats();
     updateProgress();
@@ -2205,7 +2473,7 @@
         <h3>学习偏好</h3>
         ${switchRow('autoSpeak', '自动发音', '切换到英文题时自动朗读单词')}
         ${switchRow('sound', '音效', '答对 / 答错时的提示音')}
-        ${switchRow('hideExamples', '答题时隐藏例句', '减少提示，只看单词作答')}
+        ${switchRow('hideExamples', '答题提示', '隐藏 synonym 和例句，只看生字作答')}
         <div class="setting-row">
           <div class="setting-info">
             <strong>单词字号</strong>
@@ -2245,9 +2513,9 @@
         <details class="help-details">
           <summary>怎么用？快捷键和导入格式</summary>
           <div class="help-body">
-            <p><strong>选择单元</strong> → 选题型和范围 → 开始答题。答完后点「✓ 记住了」或「✗ 还没记住」，系统会把错词记进错题本。</p>
+            <p><strong>选择单元</strong> → 选题型和范围 → 开始答题。普通练习里每个词要连续答对 2 次才算完成；点「✓ 学会了」可直接完成，点「✗ 还没记住」会记进错题本。</p>
             <p><strong>范围：</strong>前一半 / 后一半按当前单元的顺序切分；「只复习错题」和「只复习难词」会自动筛选；「翻卡自测」是另一套翻卡界面。</p>
-            <p><strong>快捷键：</strong>1–4 选答案 · Enter 下一题 · S 发音 · H 标记难词 · 翻卡时空格翻面、1 没记住、2 记住了。</p>
+            <p><strong>快捷键：</strong>1–4 选答案 · Enter 下一题 · ← 上一题 · S 发音 · H 标记难词 · 翻卡时空格翻面、1 没记住、2 学会了。</p>
             <p><strong>导入单元：</strong>每行一个词，最少写「英文,中文」；完整格式为「word,pos,synonym,中文,例句,例句翻译」，也可以直接粘贴「word (pos.)｜synonym: …｜中文：…」格式。</p>
             <p><strong>数据：</strong>所有记录只保存在这台设备的浏览器 localStorage 中，不会上传到服务器。清除浏览器数据会丢失进度，记得导出备份。</p>
           </div>
@@ -2265,10 +2533,29 @@
         <ul>
           <li>每题只答一次，答完自动进入下一题，不用点「下一题」。</li>
           <li>答错的单词会自动进入错题本，结束后可以集中复习。</li>
-          <li>速通中不会出现「记住了 / 还没记住」自评，适合考前快速过一遍。</li>
+          <li>速通中不会出现「学会了 / 还没记住」自评，适合考前快速过一遍。</li>
           <li>结束后会显示答对题数、正确率和用时，可以再来一次或复习错题。</li>
         </ul>
         <p class="help-tip">快捷键：<kbd>1</kbd>–<kbd>4</kbd> 选答案，<kbd>S</kbd> 朗读当前单词。速通中的范围、题型和单元会锁定，退出后恢复。</p>
+      </div>
+      <div class="help-actions">
+        <button type="button" class="btn primary" data-close-modal>知道了</button>
+      </div>
+    `);
+  }
+
+  function openRoundRuleHelp() {
+    openModal('📋 本轮完成规则', `
+      <div class="help-panel">
+        <p><strong>普通练习里，每个词要连续答对 2 次才算完成。</strong></p>
+        <ul>
+          <li>第一次答对后，这个词会排到本轮后面再出现一次；第二次也答对，才算过关。</li>
+          <li>中间答错一次，连续次数清零，这个词会再次排到后面。</li>
+          <li>点「✓ 学会了」可以直接完成这个词：不用等第二次，本轮后面也不会再出现。</li>
+          <li>点「✗ 还没记住」会把它记进错题本，并让它本轮继续出现。</li>
+          <li>按「← 上一题」可以退回上一题重新作答，分数和完成状态会一起回退。</li>
+        </ul>
+        <p class="help-tip">速通（⚡）和翻卡（🃏）是另外的玩法，不受“连续答对 2 次”限制。得分和正确率统计每次作答；剩余数量统计还没完成的词。</p>
       </div>
       <div class="help-actions">
         <button type="button" class="btn primary" data-close-modal>知道了</button>
@@ -2883,7 +3170,7 @@
       saveSettings();
       syncControls();
       applyExampleVisibility();
-      toast(settings.hideExamples ? '答题时已隐藏例句' : '答题时显示例句');
+      toast(settings.hideExamples ? '答题提示已关闭（synonym 和例句一起隐藏）' : '答题提示已开启');
     });
 
     els.btnBrowse.addEventListener('click', () => {
@@ -2906,6 +3193,7 @@
     });
 
     els.btnSpeedHelp.addEventListener('click', openSpeedHelp);
+    els.btnRuleHelp.addEventListener('click', openRoundRuleHelp);
 
     els.unitChips.addEventListener('click', event => {
       const chip = event.target.closest('[data-unit-id]');
@@ -3015,6 +3303,8 @@
     });
 
     els.btnFinishBrowse.addEventListener('click', openBrowse);
+
+    els.btnPrev.addEventListener('click', goToPreviousQuestion);
 
     els.btnRestart.addEventListener('click', () => {
       if (state.mode === 'cards') startCards();
@@ -3197,6 +3487,14 @@
       } else if (event.key.toLowerCase() === 's') {
         const word = state.cardQueue[state.cardIndex];
         if (word) speak(word.word);
+      }
+      return;
+    }
+
+    if (event.key === 'ArrowLeft') {
+      if (state.mode === 'normal' && !state.isEmpty && state.history.length) {
+        event.preventDefault();
+        goToPreviousQuestion();
       }
       return;
     }

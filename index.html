@@ -23,7 +23,7 @@
         <button type="button" class="icon-btn" id="btnFontPlus" title="放大字号" aria-label="放大字号">A+</button>
         <button type="button" class="icon-btn" id="btnTheme" title="切换深色模式" aria-label="切换深色模式">🌙 <span>深色</span></button>
         <button type="button" class="icon-btn" id="btnSound" title="自动发音：关" aria-label="开关自动发音">🔇 <span>发音</span></button>
-        <button type="button" class="icon-btn" id="btnExample" title="答题时显示例句" aria-label="显示或隐藏例句">📄 <span>例句</span></button>
+        <button type="button" class="icon-btn" id="btnExample" title="答题时显示 synonym 和例句" aria-label="显示或隐藏 synonym 和例句">💡 <span>提示</span></button>
         <button type="button" class="icon-btn wide" id="btnBrowse" title="查看单词表">📖 <span>单词表</span></button>
         <button type="button" class="icon-btn wide" id="btnWrongBook" title="查看错题统计">📊 <span>错题本</span></button>
         <button type="button" class="icon-btn speed" id="btnSpeed" title="速通当前范围">⚡ <span>速通</span></button>
@@ -70,6 +70,10 @@
     <div class="progress" role="progressbar" aria-label="本轮进度" aria-valuemin="0" aria-valuemax="100">
       <div class="progress-fill" id="progressFill"></div>
     </div>
+    <div class="rule-bar" id="ruleBar">
+      <span>本轮规则：每个词连续答对 <b>2</b> 次才算完成；点「✓ 学会了」可直接完成。</span>
+      <button type="button" id="btnRuleHelp">？详情</button>
+    </div>
 
     <main class="quiz-view" id="quizView">
       <div class="word-card" id="wordCard">
@@ -111,7 +115,7 @@
         <div class="result-detail" id="resultDetail"></div>
         <div class="rate-row" id="rateRow">
           <button type="button" class="rate-btn forgot" id="btnForgot" aria-pressed="false">✗ 还没记住</button>
-          <button type="button" class="rate-btn known" id="btnKnown" aria-pressed="false">✓ 记住了</button>
+          <button type="button" class="rate-btn known" id="btnKnown" aria-pressed="false">✓ 学会了</button>
         </div>
         <p class="rate-hint" id="rateHint" hidden>再点一次已选评价可取消</p>
         <button type="button" class="btn primary next" id="btnNext">下一题 <kbd>Enter</kbd></button>
@@ -175,7 +179,7 @@
       </div>
       <div class="card-rate" id="cardRate" hidden>
         <button type="button" class="rate-btn forgot" id="btnCardForgot">✗ 没记住 <kbd>1</kbd></button>
-        <button type="button" class="rate-btn known" id="btnCardKnown">✓ 记住了 <kbd>2</kbd></button>
+        <button type="button" class="rate-btn known" id="btnCardKnown">✓ 学会了 <kbd>2</kbd></button>
       </div>
       <div class="card-done" id="cardDone" hidden>
         <div class="finish-icon" aria-hidden="true">🃏</div>
@@ -192,6 +196,7 @@
     <footer class="footer" id="footer">
       <span class="shortcuts" id="shortcutHint"></span>
       <div class="footer-actions">
+        <button type="button" id="btnPrev" disabled>← 上一题</button>
         <button type="button" id="btnRestart">重开本轮</button>
       </div>
     </footer>
