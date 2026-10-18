@@ -1,8 +1,10 @@
-# 龙氏集团单词训练室 · Vocab Lab
+# BEN GEGE · Vocab Lab
 
 给同学用的英文单词背记网站，参考 [vocab-test](https://hunggy.github.io/vocab-test/) 的交互方式，做成了可**按单元切换**的版本。
 
 目前内置 **Unit 14 · 54 个生词**（来自你提供的 Word 文档），每个词都补了英文例句和中文翻译。
+
+> 内部别名：龙氏集团单词训练室。软件名与图标名保持 **BEN GEGE**。
 
 - **在线使用**：<https://zixpeak.github.io/vocab-lab/>
 - **GitHub 仓库**：<https://github.com/zixpeak/vocab-lab>

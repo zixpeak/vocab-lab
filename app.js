@@ -620,19 +620,19 @@
 
   function updateBrand() {
     if (!units.length) {
-      els.brandSub.textContent = '词库为空，请导入单元';
-      document.title = '龙氏集团单词训练室';
+      els.brandSub.textContent = '龙氏集团单词训练室 · 词库为空，请导入单元';
+      document.title = 'BEN GEGE';
       return;
     }
     if (settings.unitId === 'all') {
       const total = units.reduce((sum, unit) => sum + unit.words.length, 0);
-      els.brandSub.textContent = `全部单元 · ${total} 个生词`;
-      document.title = `全部单元 · 龙氏集团单词训练室`;
+      els.brandSub.textContent = `龙氏集团单词训练室 · 全部单元 · ${total} 个生词`;
+      document.title = `全部单元 · BEN GEGE`;
       return;
     }
     const unit = units.find(item => item.id === settings.unitId) || units[0];
-    els.brandSub.textContent = `${unit.title} · ${unit.words.length} 个生词`;
-    document.title = `${unit.title} · 龙氏集团单词训练室`;
+    els.brandSub.textContent = `龙氏集团单词训练室 · ${unit.title} · ${unit.words.length} 个生词`;
+    document.title = `${unit.title} · BEN GEGE`;
   }
 
   function renderUnitChips() {
