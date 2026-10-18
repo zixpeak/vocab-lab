@@ -84,6 +84,7 @@
           <h2 class="word-display" id="wordDisplay"></h2>
           <button type="button" class="speak-btn" id="btnSpeak" title="播放发音（S）" aria-label="播放发音">🔊</button>
         </div>
+        <div class="syn-display" id="synDisplay" hidden></div>
         <div class="word-sub" id="wordMeta"></div>
         <p class="example" id="exampleDisplay"></p>
         <p class="example-cn" id="exampleCnDisplay"></p>
@@ -109,9 +110,10 @@
         </div>
         <div class="result-detail" id="resultDetail"></div>
         <div class="rate-row" id="rateRow">
-          <button type="button" class="rate-btn forgot" id="btnForgot">✗ 还没记住</button>
-          <button type="button" class="rate-btn known" id="btnKnown">✓ 记住了</button>
+          <button type="button" class="rate-btn forgot" id="btnForgot" aria-pressed="false">✗ 还没记住</button>
+          <button type="button" class="rate-btn known" id="btnKnown" aria-pressed="false">✓ 记住了</button>
         </div>
+        <p class="rate-hint" id="rateHint" hidden>再点一次已选评价可取消</p>
         <button type="button" class="btn primary next" id="btnNext">下一题 <kbd>Enter</kbd></button>
       </div>
 

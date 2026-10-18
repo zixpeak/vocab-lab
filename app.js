@@ -46,6 +46,8 @@
     attempted: 0,
     answered: false,
     current: null,
+    rating: null,
+    ratingSnapshot: null,
     sessionWrong: new Set(),
     sessionLabel: '',
     startTime: 0,
@@ -441,10 +443,10 @@
       'btnBrowse', 'btnWrongBook', 'btnSpeed', 'btnSpeedHelp', 'btnSettings', 'unitChips', 'btnAddUnit',
       'directionSelect', 'scopeSelect', 'poolNote', 'scoreLabel', 'remainingLabel',
       'accuracyLabel', 'timeLabel', 'progressFill', 'quizView', 'wordCard', 'questionTag',
-      'btnHard', 'btnSlash', 'wordDisplay', 'btnSpeak', 'wordMeta', 'exampleDisplay',
+      'btnHard', 'btnSlash', 'wordDisplay', 'synDisplay', 'btnSpeak', 'wordMeta', 'exampleDisplay',
       'exampleCnDisplay', 'stageHint', 'optionsGrid', 'listenPanel', 'answerInput',
       'btnReplay', 'btnSubmitAnswer', 'inputFeedback', 'resultPanel', 'resultMark',
-      'resultText', 'resultDetail', 'rateRow', 'btnForgot', 'btnKnown', 'btnNext',
+      'resultText', 'resultDetail', 'rateRow', 'rateHint', 'btnForgot', 'btnKnown', 'btnNext',
       'emptyState', 'emptyTitle', 'emptyText', 'btnEmptyReset', 'finishPanel', 'finishIcon',
       'finishTitle', 'finishSub', 'finishStats', 'btnFinishAgain', 'btnFinishWrong',
       'btnFinishBrowse', 'browseView', 'browseSub', 'btnCloseBrowse', 'browseSearch',
@@ -621,6 +623,7 @@
     saveSettings();
     applyScale();
     syncControls();
+    requestAnimationFrame(fitWordDisplay);
     const label = byId('fontScaleLabel');
     if (label) label.textContent = `${Math.round(settings.fontScale * 100)}%`;
   }
@@ -807,6 +810,8 @@
     state.attempted = 0;
     state.answered = false;
     state.current = null;
+    state.rating = null;
+    state.ratingSnapshot = null;
     state.sessionWrong = new Set();
     state.sessionLabel = opts.label || '';
     state.startTime = Date.now();
@@ -859,6 +864,8 @@
     state.attempted = 0;
     state.answered = false;
     state.current = null;
+    state.rating = null;
+    state.ratingSnapshot = null;
     state.sessionWrong = new Set();
     state.sessionLabel = '速通';
     state.startTime = Date.now();
@@ -1012,6 +1019,8 @@
     const question = makeQuestion(word);
     state.current = question;
     state.answered = false;
+    state.rating = null;
+    state.ratingSnapshot = null;
     state.isEmpty = false;
 
     els.wordCard.hidden = false;
@@ -1036,6 +1045,7 @@
 
     renderQuestionContent(question);
     updateHardButton();
+    requestAnimationFrame(fitWordDisplay);
 
     els.wordCard.classList.remove('enter');
     void els.wordCard.offsetWidth;
@@ -1074,6 +1084,12 @@
     const direction = question.direction;
 
     els.wordDisplay.className = 'word-display';
+    els.wordDisplay.style.fontSize = '';
+    els.wordDisplay.style.whiteSpace = '';
+    els.wordDisplay.style.maxWidth = '';
+    els.synDisplay.hidden = true;
+    els.synDisplay.innerHTML = '';
+    els.synDisplay.style.fontSize = '';
     els.exampleDisplay.hidden = false;
     els.exampleCnDisplay.hidden = false;
     els.exampleDisplay.textContent = '';
@@ -1081,13 +1097,14 @@
     els.stageHint.className = 'stage-hint';
 
     const posHtml = word.pos ? `<span class="pos-badge">${escapeHtml(word.pos)}</span>` : '';
-    const synonymHtml = direction === 'en2zh' && word.syn
-      ? `<span class="syn-prompt">近义：${escapeHtml(word.syn)}</span>`
-      : '';
-    els.wordMeta.innerHTML = `${posHtml}<span class="unit-badge">${escapeHtml(word.unitTitle)}</span>${synonymHtml}`;
+    els.wordMeta.innerHTML = `${posHtml}<span class="unit-badge">${escapeHtml(word.unitTitle)}</span>`;
 
     if (direction === 'en2zh') {
       els.wordDisplay.textContent = word.word;
+      if (word.syn) {
+        els.synDisplay.innerHTML = `<span class="syn-label">近义</span>${escapeHtml(word.syn)}`;
+        els.synDisplay.hidden = false;
+      }
       if (word.ex) {
         els.exampleDisplay.innerHTML = highlightText(word.ex, word.word);
       } else {
@@ -1136,6 +1153,45 @@
       )).join('');
     }
     return `${escapeHtml(source)} <span class="blank">____</span>`;
+  }
+
+  function fitWordDisplay() {
+    if (!state.current || state.mode !== 'normal' || els.quizView.hidden) return;
+
+    const el = els.wordDisplay;
+    el.style.fontSize = '';
+    el.style.whiteSpace = '';
+    el.style.maxWidth = '';
+
+    if (state.current.direction !== 'en2zh') {
+      els.synDisplay.style.fontSize = '';
+      return;
+    }
+
+    const text = el.textContent.trim();
+    if (!text) return;
+
+    const hasSpace = /\s/.test(text);
+    el.style.whiteSpace = hasSpace ? 'normal' : 'nowrap';
+
+    const line = el.parentElement;
+    const gap = parseFloat(getComputedStyle(line).columnGap) || 0;
+    const speakerGap = els.btnSpeak.hidden ? 0 : els.btnSpeak.offsetWidth + gap;
+    const available = Math.max(90, line.clientWidth - speakerGap);
+    el.style.maxWidth = `${available}px`;
+
+    if (!hasSpace) {
+      let size = parseFloat(getComputedStyle(el).fontSize);
+      let guard = 0;
+      while (el.scrollWidth > available && size > 20 && guard < 50) {
+        size -= 1;
+        el.style.fontSize = `${size}px`;
+        guard++;
+      }
+    }
+
+    const wordSize = parseFloat(getComputedStyle(el).fontSize) || 42;
+    els.synDisplay.style.fontSize = `${Math.max(15, Math.round(wordSize * 0.6))}px`;
   }
 
   function renderOptions(question) {
@@ -1301,8 +1357,9 @@
     `;
 
     els.rateRow.hidden = false;
-    els.btnKnown.classList.remove('selected');
-    els.btnForgot.classList.remove('selected');
+    state.rating = null;
+    state.ratingSnapshot = null;
+    updateRateButtons();
     els.btnKnown.disabled = false;
     els.btnForgot.disabled = false;
 
@@ -1330,26 +1387,70 @@
     }
   }
 
+  function captureRatingSnapshot(word) {
+    return {
+      key: word.key,
+      wrong: progress.wrong[word.key],
+      mastered: !!progress.mastered[word.key],
+      inSessionWrong: state.sessionWrong.has(word.key)
+    };
+  }
+
+  function restoreRatingSnapshot(snapshot) {
+    if (!snapshot) return;
+    if (snapshot.wrong === undefined) delete progress.wrong[snapshot.key];
+    else progress.wrong[snapshot.key] = snapshot.wrong;
+    if (snapshot.mastered) progress.mastered[snapshot.key] = true;
+    else delete progress.mastered[snapshot.key];
+    if (snapshot.inSessionWrong) state.sessionWrong.add(snapshot.key);
+    else state.sessionWrong.delete(snapshot.key);
+  }
+
+  function updateRateButtons() {
+    const known = state.rating === 'known';
+    const forgot = state.rating === 'forgot';
+    els.btnKnown.classList.toggle('selected', known);
+    els.btnForgot.classList.toggle('selected', forgot);
+    els.btnKnown.setAttribute('aria-pressed', known ? 'true' : 'false');
+    els.btnForgot.setAttribute('aria-pressed', forgot ? 'true' : 'false');
+    els.rateHint.hidden = !state.rating;
+  }
+
   function rateWord(known) {
     if (!state.current) return;
     const word = state.current.word;
+    const wanted = known ? 'known' : 'forgot';
+    const isCancel = state.rating === wanted;
 
+    if (state.rating) {
+      restoreRatingSnapshot(state.ratingSnapshot);
+      state.rating = null;
+      state.ratingSnapshot = null;
+    }
+
+    if (isCancel) {
+      updateRateButtons();
+      saveProgress();
+      toast('已取消评价');
+      blurActive();
+      return;
+    }
+
+    state.ratingSnapshot = captureRatingSnapshot(word);
     if (known) {
       delete progress.wrong[word.key];
       progress.mastered[word.key] = true;
       state.sessionWrong.delete(word.key);
-      els.btnKnown.classList.add('selected');
-      els.btnForgot.classList.remove('selected');
       toast('✓ 已标记为掌握');
     } else {
       if (!progress.wrong[word.key]) progress.wrong[word.key] = 1;
       delete progress.mastered[word.key];
       state.sessionWrong.add(word.key);
-      els.btnForgot.classList.add('selected');
-      els.btnKnown.classList.remove('selected');
       toast('已加入错题本');
     }
+    state.rating = wanted;
     saveProgress();
+    updateRateButtons();
     blurActive();
   }
 
@@ -1767,6 +1868,7 @@
     } else {
       els.quizView.hidden = false;
       els.cardView.hidden = true;
+      requestAnimationFrame(fitWordDisplay);
     }
     resumeSpeedIfNeeded();
   }
@@ -3025,6 +3127,12 @@
     });
 
     document.addEventListener('keydown', onKeyDown);
+
+    let resizeTimer = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(fitWordDisplay, 120);
+    });
 
     window.addEventListener('beforeunload', () => {
       saveSettings();

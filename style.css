@@ -622,8 +622,9 @@ body.dark .question-tag {
   font-weight: 700;
   line-height: 1.16;
   letter-spacing: -0.02em;
-  word-break: break-word;
-  overflow-wrap: anywhere;
+  word-break: keep-all;
+  overflow-wrap: normal;
+  hyphens: none;
   max-width: 100%;
 }
 
@@ -631,6 +632,8 @@ body.dark .question-tag {
   font-family: var(--font-ui);
   font-size: calc(37px * var(--scale));
   letter-spacing: -0.01em;
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 
 .word-display.sentence {
@@ -639,6 +642,8 @@ body.dark .question-tag {
   font-weight: 700;
   line-height: 1.65;
   letter-spacing: 0;
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 
 .speak-btn {
@@ -699,19 +704,38 @@ body.dark .question-tag {
   letter-spacing: 0.06em;
 }
 
-.syn-prompt {
-  display: inline-flex;
-  align-items: center;
-  padding: 3px 9px;
-  border-radius: 999px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  color: var(--muted);
-  font-size: 11.5px;
+.syn-display {
+  position: relative;
+  margin: 4px auto 0;
+  max-width: 92%;
+  font-family: var(--font-word);
+  font-size: calc(26px * var(--scale));
   font-weight: 600;
-  line-height: 1.4;
-  max-width: 100%;
+  line-height: 1.45;
+  letter-spacing: -0.01em;
+  color: var(--accent);
+  text-align: center;
   overflow-wrap: anywhere;
+}
+
+.syn-display .syn-label {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  vertical-align: middle;
+  transform: translateY(-2px);
+}
+
+body.dark .syn-display,
+body.dark .syn-display .syn-label {
+  color: var(--accent-2);
 }
 
 .example {
@@ -1093,6 +1117,13 @@ kbd {
   margin-top: 12px;
 }
 
+.rate-hint {
+  margin-top: 7px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--faint);
+}
+
 .rate-btn {
   flex: 1;
   min-height: 44px;
@@ -1314,8 +1345,13 @@ kbd {
 }
 
 .card-syn {
-  font-size: 12.5px;
-  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+body.dark .card-syn {
+  color: var(--accent-2);
 }
 
 .card-ex {
