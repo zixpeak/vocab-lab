@@ -244,6 +244,21 @@ textarea:focus-visible,
   background: linear-gradient(135deg, #dc2626, #b91c1c);
 }
 
+.icon-btn.help {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+
+.icon-btn.help:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+body.dark .icon-btn.help {
+  color: var(--accent-2);
+}
+
 .icon-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -1962,6 +1977,53 @@ body.browse-open .footer {
   color: var(--ink);
 }
 
+.help-panel {
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--muted);
+}
+
+.help-panel strong {
+  color: var(--ink);
+}
+
+.help-panel p + ul,
+.help-panel ul + p {
+  margin-top: 10px;
+}
+
+.help-panel ul {
+  margin: 8px 0 0 18px;
+}
+
+.help-panel li {
+  margin-bottom: 5px;
+}
+
+.help-tip {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+}
+
+body.dark .help-tip {
+  color: var(--accent-2);
+}
+
+.help-panel kbd {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.help-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
 /* ---------- 错题本 ---------- */
 
 .wrong-summary {
@@ -2388,13 +2450,19 @@ body.dark .toast {
     max-width: 170px;
   }
 
-  .icon-btn.wide span {
-    display: none;
+  .toolbar {
+    gap: 5px;
+  }
+
+  .icon-btn {
+    height: 34px;
+    padding: 0 9px;
+    font-size: 11.5px;
   }
 
   .icon-btn.wide {
-    width: 38px;
-    padding: 0;
+    width: auto;
+    padding: 0 9px;
   }
 
   .word-line {

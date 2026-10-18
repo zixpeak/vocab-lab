@@ -438,7 +438,7 @@
   function cacheEls() {
     [
       'brandSub', 'btnFontMinus', 'btnFontPlus', 'btnTheme', 'btnSound', 'btnExample',
-      'btnBrowse', 'btnWrongBook', 'btnSpeed', 'btnSettings', 'unitChips', 'btnAddUnit',
+      'btnBrowse', 'btnWrongBook', 'btnSpeed', 'btnSpeedHelp', 'btnSettings', 'unitChips', 'btnAddUnit',
       'directionSelect', 'scopeSelect', 'poolNote', 'scoreLabel', 'remainingLabel',
       'accuracyLabel', 'timeLabel', 'progressFill', 'quizView', 'wordCard', 'questionTag',
       'btnHard', 'btnSlash', 'wordDisplay', 'btnSpeak', 'wordMeta', 'exampleDisplay',
@@ -503,18 +503,18 @@
   function updateBrand() {
     if (!units.length) {
       els.brandSub.textContent = '词库为空，请导入单元';
-      document.title = '单词训练室';
+      document.title = '龙氏集团单词训练室';
       return;
     }
     if (settings.unitId === 'all') {
       const total = units.reduce((sum, unit) => sum + unit.words.length, 0);
       els.brandSub.textContent = `全部单元 · ${total} 个生词`;
-      document.title = `全部单元 · 单词训练室`;
+      document.title = `全部单元 · 龙氏集团单词训练室`;
       return;
     }
     const unit = units.find(item => item.id === settings.unitId) || units[0];
     els.brandSub.textContent = `${unit.title} · ${unit.words.length} 个生词`;
-    document.title = `${unit.title} · 单词训练室`;
+    document.title = `${unit.title} · 龙氏集团单词训练室`;
   }
 
   function renderUnitChips() {
@@ -561,19 +561,20 @@
 
   function updateThemeBtn() {
     const dark = settings.theme === 'dark';
-    els.btnTheme.textContent = dark ? '☀️' : '🌙';
+    els.btnTheme.innerHTML = dark ? '☀️ <span>浅色</span>' : '🌙 <span>深色</span>';
     els.btnTheme.title = dark ? '切换到浅色模式' : '切换到深色模式';
+    els.btnTheme.setAttribute('aria-label', els.btnTheme.title);
     els.btnTheme.classList.toggle('active', dark);
   }
 
   function updateSoundBtn() {
-    els.btnSound.textContent = settings.autoSpeak ? '🔊' : '🔇';
+    els.btnSound.innerHTML = settings.autoSpeak ? '🔊 <span>发音</span>' : '🔇 <span>发音</span>';
     els.btnSound.classList.toggle('active', settings.autoSpeak);
     els.btnSound.title = settings.autoSpeak ? '自动发音：开' : '自动发音：关';
   }
 
   function updateExampleBtn() {
-    els.btnExample.textContent = settings.hideExamples ? '🚫' : '📄';
+    els.btnExample.innerHTML = `${settings.hideExamples ? '🚫' : '📄'} <span>例句</span>`;
     els.btnExample.classList.toggle('active', settings.hideExamples);
     els.btnExample.title = settings.hideExamples
       ? '答题时已隐藏例句（点击恢复）'
@@ -2155,6 +2156,24 @@
     openModal('⚙️ 设置与数据', html);
   }
 
+  function openSpeedHelp() {
+    openModal('⚡ 速通怎么玩', `
+      <div class="help-panel">
+        <p><strong>速通 = 连续刷题。</strong>系统会按你当前选择的单元、范围和题型，把单词快速过一遍。</p>
+        <ul>
+          <li>每题只答一次，答完自动进入下一题，不用点「下一题」。</li>
+          <li>答错的单词会自动进入错题本，结束后可以集中复习。</li>
+          <li>速通中不会出现「记住了 / 还没记住」自评，适合考前快速过一遍。</li>
+          <li>结束后会显示答对题数、正确率和用时，可以再来一次或复习错题。</li>
+        </ul>
+        <p class="help-tip">快捷键：<kbd>1</kbd>–<kbd>4</kbd> 选答案，<kbd>S</kbd> 朗读当前单词。速通中的范围、题型和单元会锁定，退出后恢复。</p>
+      </div>
+      <div class="help-actions">
+        <button type="button" class="btn primary" data-close-modal>知道了</button>
+      </div>
+    `);
+  }
+
   function exportBackup() {
     const payload = {
       app: 'vocab-lab',
@@ -2784,6 +2803,8 @@
       }
     });
 
+    els.btnSpeedHelp.addEventListener('click', openSpeedHelp);
+
     els.unitChips.addEventListener('click', event => {
       const chip = event.target.closest('[data-unit-id]');
       if (!chip || state.mode === 'speed') return;
@@ -2957,6 +2978,12 @@
     });
 
     els.modalBody.addEventListener('click', event => {
+      const closeModalButton = event.target.closest('[data-close-modal]');
+      if (closeModalButton) {
+        closeModal();
+        return;
+      }
+
       const deleteUnitButton = event.target.closest('[data-del-unit]');
       if (deleteUnitButton) {
         const id = deleteUnitButton.dataset.delUnit;

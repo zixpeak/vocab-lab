@@ -1,4 +1,4 @@
-# 单词训练室 · Vocab Lab
+# 龙氏集团单词训练室 · Vocab Lab
 
 给同学用的英文单词背记网站，参考 [vocab-test](https://hunggy.github.io/vocab-test/) 的交互方式，做成了可**按单元切换**的版本。
 
