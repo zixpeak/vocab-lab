@@ -853,11 +853,13 @@
     if (state.mode === 'cards') {
       hint = `空格 / 点击翻面 · ${kbd('1')} 没记住 · ${kbd('2')} 学会了 · ${kbd('S')} 发音`;
     } else if (state.mode === 'speed') {
-      hint = `⚡ 速通中：${kbd('1')}–${kbd('4')} 选择 · 答完自动下一题 · ${kbd('S')} 发音`;
+      const canSpeak = settings.direction === 'en2zh' || settings.direction === 'listen';
+      hint = `⚡ 速通中：${kbd('1')}–${kbd('4')} 选择 · 答完自动下一题${canSpeak ? ` · ${kbd('S')} 发音` : ''}`;
     } else if (settings.direction === 'listen') {
       hint = `输入答案后按 ${kbd('Enter')} 提交 · ${kbd('←')} 上一题 · ${kbd('S')} 重听发音`;
     } else {
-      hint = `快捷键：${kbd('1')}–${kbd('4')} 选择 · ${kbd('Enter')} 下一题 · ${kbd('←')} 上一题 · ${kbd('S')} 发音 · ${kbd('H')} 标记难词`;
+      const canSpeak = settings.direction === 'en2zh';
+      hint = `快捷键：${kbd('1')}–${kbd('4')} 选择 · ${kbd('Enter')} 下一题 · ${kbd('←')} 上一题${canSpeak ? ` · ${kbd('S')} 发音` : ''} · ${kbd('H')} 标记难词`;
     }
     els.shortcutHint.innerHTML = hint;
     els.btnRestart.textContent = state.mode === 'cards'
@@ -1165,6 +1167,7 @@
     if (state.mode === 'cards') return;
     clearSpeedTimer();
     blurActive();
+    cancelSpeech();
 
     if (!state.queue.length) {
       showEmpty();
@@ -1935,6 +1938,7 @@
       return;
     }
     blurActive();
+    cancelSpeech();
     const word = state.cardQueue[state.cardIndex];
     state.cardFlipped = false;
     state.cardDone = false;
@@ -2103,6 +2107,7 @@
       return;
     }
     blurActive();
+    cancelSpeech();
     state.preBrowseMode = state.mode;
     state.browseOpen = true;
     pauseSpeedTimer();
@@ -3019,6 +3024,23 @@
      发音与音效
      ========================================================= */
 
+  function cancelSpeech() {
+    if ('speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch (err) {
+        /* 忽略浏览器语音取消异常 */
+      }
+    }
+    document.querySelectorAll('.speak-btn').forEach(button => button.classList.remove('speaking'));
+  }
+
+  function canAutoSpeakCurrent() {
+    if (state.mode === 'cards') return true;
+    if (!state.current) return false;
+    return state.current.direction === 'en2zh' || state.current.direction === 'listen';
+  }
+
   function speak(text) {
     if (!text) return;
     if (!('speechSynthesis' in window)) {
@@ -3156,10 +3178,11 @@
       saveSettings();
       syncControls();
       toast(settings.autoSpeak ? '已开启自动发音' : '已关闭自动发音');
-      if (settings.autoSpeak) {
+      if (!settings.autoSpeak) cancelSpeech();
+      if (settings.autoSpeak && canAutoSpeakCurrent()) {
         if (state.mode === 'cards' && state.cardQueue[state.cardIndex]) {
           speak(state.cardQueue[state.cardIndex].word);
-        } else if (state.mode === 'normal' && state.current) {
+        } else if (state.current) {
           speak(state.current.word.word);
         }
       }
@@ -3248,7 +3271,9 @@
     });
 
     els.btnSpeak.addEventListener('click', () => {
-      if (state.current) speak(state.current.word.word);
+      if (!state.current) return;
+      if (!state.answered && !['en2zh', 'listen'].includes(state.current.direction)) return;
+      speak(state.current.word.word);
     });
 
     els.btnHard.addEventListener('click', toggleHard);
@@ -3360,10 +3385,11 @@
       saveSettings();
       syncControls();
       applyExampleVisibility();
-      if (key === 'autoSpeak' && settings.autoSpeak) {
+      if (key === 'autoSpeak' && !settings.autoSpeak) cancelSpeech();
+      if (key === 'autoSpeak' && settings.autoSpeak && canAutoSpeakCurrent()) {
         if (state.mode === 'cards' && state.cardQueue[state.cardIndex]) {
           speak(state.cardQueue[state.cardIndex].word);
-        } else if (state.mode === 'normal' && state.current) {
+        } else if (state.current) {
           speak(state.current.word.word);
         }
       }
@@ -3525,6 +3551,11 @@
     }
 
     if (event.key.toLowerCase() === 's' && state.current) {
+      if (!state.answered && !['en2zh', 'listen'].includes(state.current.direction)) {
+        event.preventDefault();
+        toast('先作答，答完再听发音');
+        return;
+      }
       event.preventDefault();
       speak(state.current.word.word);
       return;
