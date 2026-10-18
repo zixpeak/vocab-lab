@@ -37,6 +37,7 @@
   let progress = { wrong: {}, mastered: {}, hard: {}, slashed: {} };
   let confirmResolver = null;
   let audioCtx = null;
+  let deferredInstallPrompt = null;
 
   const state = {
     mode: 'normal',            // normal | speed | cards
@@ -2473,6 +2474,23 @@
         `).join('')
       : '<p class="setting-info"><span>还没有自定义单元。导入后可以在这里管理。</span></p>';
 
+    const installSection = isStandaloneMode()
+      ? `
+        <section class="settings-section">
+          <h3>安装到桌面</h3>
+          <div class="setting-info"><span>✅ 你正在以 App 模式运行，不会显示浏览器地址栏。</span></div>
+        </section>
+      `
+      : `
+        <section class="settings-section">
+          <h3>安装到桌面</h3>
+          <div class="setting-info"><span>安装后从桌面图标打开会像 App 一样全屏运行，不显示浏览器地址栏，并支持离线使用。</span></div>
+          <div class="btn-row">
+            <button type="button" class="btn" data-set="install">📲 安装到桌面</button>
+          </div>
+        </section>
+      `;
+
     const html = `
       <section class="settings-section">
         <h3>学习偏好</h3>
@@ -2491,6 +2509,8 @@
           </div>
         </div>
       </section>
+
+      ${installSection}
 
       <section class="settings-section">
         <h3>数据与备份</h3>
@@ -2561,6 +2581,28 @@
           <li>按「← 上一题」可以退回上一题重新作答，分数和完成状态会一起回退。</li>
         </ul>
         <p class="help-tip">速通（⚡）和翻卡（🃏）是另外的玩法，不受“连续答对 2 次”限制。得分和正确率统计每次作答；剩余数量统计还没完成的词。</p>
+      </div>
+      <div class="help-actions">
+        <button type="button" class="btn primary" data-close-modal>知道了</button>
+      </div>
+    `);
+  }
+
+  function isStandaloneMode() {
+    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+      window.navigator.standalone === true;
+  }
+
+  function openInstallHelp() {
+    openModal('📲 安装到桌面', `
+      <div class="help-panel">
+        <p><strong>安装后从桌面图标打开，会像 App 一样独立全屏运行，不显示浏览器地址栏。</strong></p>
+        <ul>
+          <li><strong>iPhone / iPad：</strong>用 Safari 打开本站 → 点底部「分享」→「添加到主屏幕」。</li>
+          <li><strong>Android：</strong>用 Chrome 打开本站 → 右上角菜单 →「安装应用」或「添加到主屏幕」。</li>
+          <li><strong>电脑：</strong>Chrome / Edge 地址栏右侧的安装图标，或菜单里的「安装 BEN GEGE」。</li>
+        </ul>
+        <p class="help-tip">如果桌面图标打开还是跳到浏览器：先删掉旧图标，再从浏览器重新添加/安装一次。iOS 请用 Safari，不要用微信内置浏览器；微信里打开的网页不能直接安装成独立 App。首次在线打开后，Service Worker 会缓存页面，之后断网也能打开。</p>
       </div>
       <div class="help-actions">
         <button type="button" class="btn primary" data-close-modal>知道了</button>
@@ -2687,6 +2729,15 @@
     } else if (action === 'addUnit') {
       closeModal();
       openImportUnit();
+    } else if (action === 'install') {
+      if (deferredInstallPrompt) {
+        deferredInstallPrompt.prompt();
+        deferredInstallPrompt.userChoice.finally(() => {
+          deferredInstallPrompt = null;
+        });
+      } else {
+        openInstallHelp();
+      }
     }
   }
 
@@ -3442,6 +3493,15 @@
       if (file) importBackupFile(file);
     });
 
+    window.addEventListener('beforeinstallprompt', event => {
+      event.preventDefault();
+      deferredInstallPrompt = event;
+    });
+    window.addEventListener('appinstalled', () => {
+      deferredInstallPrompt = null;
+      toast('已安装到桌面');
+    });
+
     document.addEventListener('keydown', onKeyDown);
 
     let resizeTimer = null;
@@ -3576,4 +3636,14 @@
   } else {
     init();
   }
+
+  function registerServiceWorker() {
+    if (!('serviceWorker' in navigator) || window.location.protocol === 'file:') return;
+    navigator.serviceWorker.register('./sw.js').catch(() => {
+      /* 离线缓存不可用时不影响正常使用 */
+    });
+  }
+
+  if (document.readyState === 'complete') registerServiceWorker();
+  else window.addEventListener('load', registerServiceWorker);
 })();
