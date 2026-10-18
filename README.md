@@ -4,6 +4,9 @@
 
 目前内置 **Unit 14 · 54 个生词**（来自你提供的 Word 文档），每个词都补了英文例句和中文翻译。
 
+- **在线使用**：<https://zixpeak.github.io/vocab-lab/>
+- **GitHub 仓库**：<https://github.com/zixpeak/vocab-lab>
+
 ## 快速开始
 
 ```bash
