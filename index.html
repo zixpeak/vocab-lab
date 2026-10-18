@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="按单元分层的英文单词训练站：选择题、句子填空、听音拼写、翻卡自测与错题复习。">
+  <title>单词训练室 · Unit 14</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230f766e'/%3E%3Ctext x='32' y='44' font-size='34' font-family='Georgia,serif' font-weight='700' fill='white' text-anchor='middle'%3EAa%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">Aa</div>
+        <div class="brand-text">
+          <h1>单词训练室</h1>
+          <p id="brandSub">正在加载词库…</p>
+        </div>
+      </div>
+      <div class="toolbar" role="toolbar" aria-label="工具">
+        <button type="button" class="icon-btn" id="btnFontMinus" title="缩小字号" aria-label="缩小字号">A−</button>
+        <button type="button" class="icon-btn" id="btnFontPlus" title="放大字号" aria-label="放大字号">A+</button>
+        <button type="button" class="icon-btn" id="btnTheme" title="切换深色模式" aria-label="切换深色模式">🌙</button>
+        <button type="button" class="icon-btn" id="btnSound" title="自动发音：关" aria-label="开关自动发音">🔇</button>
+        <button type="button" class="icon-btn" id="btnExample" title="答题时显示例句" aria-label="显示或隐藏例句">📄</button>
+        <button type="button" class="icon-btn wide" id="btnBrowse" title="查看单词表">📖 <span>单词表</span></button>
+        <button type="button" class="icon-btn wide" id="btnWrongBook" title="查看错题统计">📊 <span>错题本</span></button>
+        <button type="button" class="icon-btn speed" id="btnSpeed" title="速通当前单元">⚡ <span>速通</span></button>
+        <button type="button" class="icon-btn" id="btnSettings" title="设置与数据" aria-label="设置">⚙️</button>
+      </div>
+    </header>
+
+    <section class="unit-strip" aria-label="单元选择">
+      <span class="strip-label">📚 单元</span>
+      <div class="unit-chips" id="unitChips"></div>
+      <button type="button" class="unit-chip add" id="btnAddUnit">＋ 导入单元</button>
+    </section>
+
+    <section class="control-strip">
+      <div class="control">
+        <label class="control-label" for="directionSelect">题型</label>
+        <select id="directionSelect">
+          <option value="en2zh">英文 → 中文</option>
+          <option value="zh2en">中文 → 英文</option>
+          <option value="fill">句子填空</option>
+          <option value="listen">🔊 听音拼写</option>
+        </select>
+      </div>
+      <div class="control">
+        <label class="control-label" for="scopeSelect">范围</label>
+        <select id="scopeSelect">
+          <option value="all">全部单词</option>
+          <option value="first">前一半</option>
+          <option value="second">后一半</option>
+          <option value="wrong">只复习错题</option>
+          <option value="hard">只复习难词</option>
+          <option value="cards">🃏 翻卡自测</option>
+        </select>
+      </div>
+      <div class="pool-note" id="poolNote">—</div>
+      <div class="stats">
+        <span class="stat"><b id="scoreLabel">0</b><small>答对</small></span>
+        <span class="stat remaining"><b id="remainingLabel">0</b><small>剩余</small></span>
+        <span class="stat accuracy"><b id="accuracyLabel">—</b><small>正确率</small></span>
+        <span class="stat time"><b id="timeLabel">0:00</b><small>用时</small></span>
+      </div>
+    </section>
+    <div class="progress" role="progressbar" aria-label="本轮进度" aria-valuemin="0" aria-valuemax="100">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+
+    <main class="quiz-view" id="quizView">
+      <div class="word-card" id="wordCard">
+        <div class="card-head">
+          <span class="question-tag" id="questionTag">英 → 中</span>
+          <div class="card-actions">
+            <button type="button" class="mini-btn" id="btnHard" title="标记 / 取消难词" aria-label="标记为难词">☆</button>
+            <button type="button" class="mini-btn" id="btnSlash" title="不再考这个词" aria-label="不再考这个词">🔪</button>
+          </div>
+        </div>
+        <div class="word-line">
+          <h2 class="word-display" id="wordDisplay"></h2>
+          <button type="button" class="speak-btn" id="btnSpeak" title="播放发音（S）" aria-label="播放发音">🔊</button>
+        </div>
+        <div class="word-sub" id="wordMeta"></div>
+        <p class="example" id="exampleDisplay"></p>
+        <p class="example-cn" id="exampleCnDisplay"></p>
+        <p class="stage-hint" id="stageHint">请选择正确的中文意思</p>
+      </div>
+
+      <div class="options-grid" id="optionsGrid"></div>
+
+      <div class="listen-panel" id="listenPanel" hidden>
+        <div class="listen-big" aria-hidden="true">🔊</div>
+        <input type="text" id="answerInput" placeholder="输入你听到的英文…" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="输入听到的英文单词">
+        <div class="listen-actions">
+          <button type="button" class="btn ghost" id="btnReplay">再听一次</button>
+          <button type="button" class="btn primary" id="btnSubmitAnswer">提交答案</button>
+        </div>
+        <p class="feedback" id="inputFeedback" aria-live="polite"></p>
+      </div>
+
+      <div class="result-panel" id="resultPanel" hidden aria-live="polite">
+        <div class="result-main">
+          <span class="result-mark" id="resultMark">✓</span>
+          <span id="resultText"></span>
+        </div>
+        <div class="result-detail" id="resultDetail"></div>
+        <div class="rate-row" id="rateRow">
+          <button type="button" class="rate-btn forgot" id="btnForgot">✗ 还没记住</button>
+          <button type="button" class="rate-btn known" id="btnKnown">✓ 记住了</button>
+        </div>
+        <button type="button" class="btn primary next" id="btnNext">下一题 <kbd>Enter</kbd></button>
+      </div>
+
+      <div class="empty-state" id="emptyState" hidden>
+        <div class="empty-icon" aria-hidden="true">🗂️</div>
+        <h3 id="emptyTitle">这个范围还没有单词</h3>
+        <p id="emptyText"></p>
+        <button type="button" class="btn primary" id="btnEmptyReset">返回全部单词</button>
+      </div>
+
+      <div class="finish-panel" id="finishPanel" hidden>
+        <div class="finish-icon" id="finishIcon" aria-hidden="true">🎉</div>
+        <h2 id="finishTitle">本轮完成！</h2>
+        <p id="finishSub"></p>
+        <div class="finish-stats" id="finishStats"></div>
+        <div class="finish-actions">
+          <button type="button" class="btn primary" id="btnFinishAgain">再来一轮</button>
+          <button type="button" class="btn" id="btnFinishWrong">复习本轮错题</button>
+          <button type="button" class="btn ghost" id="btnFinishBrowse">看看单词表</button>
+        </div>
+      </div>
+    </main>
+
+    <section class="browse-view" id="browseView" hidden>
+      <div class="view-head">
+        <div>
+          <h2>📖 单词表</h2>
+          <p id="browseSub"></p>
+        </div>
+        <button type="button" class="btn ghost" id="btnCloseBrowse">返回练习</button>
+      </div>
+      <div class="browse-tools">
+        <input type="search" id="browseSearch" placeholder="搜索英文、中文或近义词…" aria-label="搜索单词">
+        <label class="toggle"><input type="checkbox" id="browseShowSlashed"> 显示已斩单词</label>
+      </div>
+      <div class="browse-list" id="browseList"></div>
+    </section>
+
+    <section class="card-view" id="cardView" hidden>
+      <div class="card-meta">
+        <span id="cardMetaLeft">第 1 / 1 张</span>
+        <span id="cardMetaRight">记住 0 · 没记住 0</span>
+      </div>
+      <div class="flip-card" id="flipCard" tabindex="0" role="button" aria-label="翻卡，点击查看释义">
+        <div class="flip-inner">
+          <div class="flip-face front">
+            <div class="card-front-word" id="cardFrontWord"></div>
+            <div class="word-sub" id="cardFrontPos"></div>
+            <button type="button" class="speak-btn" id="btnCardSpeak" title="播放发音" aria-label="播放发音">🔊</button>
+            <div class="card-hint">点击卡片 / 空格翻面</div>
+          </div>
+          <div class="flip-face back">
+            <div class="card-ch" id="cardBackCh"></div>
+            <div class="card-syn" id="cardBackSyn"></div>
+            <p class="card-ex" id="cardBackEx"></p>
+            <p class="card-ex-cn" id="cardBackExCn"></p>
+          </div>
+        </div>
+      </div>
+      <div class="card-rate" id="cardRate" hidden>
+        <button type="button" class="rate-btn forgot" id="btnCardForgot">✗ 没记住 <kbd>1</kbd></button>
+        <button type="button" class="rate-btn known" id="btnCardKnown">✓ 记住了 <kbd>2</kbd></button>
+      </div>
+      <div class="card-done" id="cardDone" hidden>
+        <div class="finish-icon" aria-hidden="true">🃏</div>
+        <h2>翻卡完成！</h2>
+        <p id="cardDoneStats"></p>
+        <div class="finish-actions">
+          <button type="button" class="btn primary" id="btnCardAgain">再来一轮</button>
+          <button type="button" class="btn" id="btnCardReviewForgot">复习没记住的</button>
+          <button type="button" class="btn ghost" id="btnCardExit">返回练习</button>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer" id="footer">
+      <span class="shortcuts" id="shortcutHint"></span>
+      <div class="footer-actions">
+        <button type="button" id="btnRestart">重开本轮</button>
+      </div>
+    </footer>
+  </div>
+
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-head">
+        <h2 id="modalTitle">设置</h2>
+        <button type="button" class="modal-close" id="modalClose" aria-label="关闭">✕</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+    </div>
+  </div>
+
+  <div class="confirm-overlay" id="confirmOverlay">
+    <div class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmText">
+      <h2 id="confirmTitle">确认</h2>
+      <p id="confirmText"></p>
+      <div class="confirm-actions">
+        <button type="button" class="btn ghost" id="confirmCancel">取消</button>
+        <button type="button" class="btn danger" id="confirmOk">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
+  <input type="file" id="importFile" accept=".json,application/json" hidden>
+
+  <script src="data/units.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
