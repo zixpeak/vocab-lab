@@ -15,7 +15,7 @@
     en2zh: '英文 → 中文',
     zh2en: '中文 → 英文',
     syn2word: '近义默写',
-    fill: '句子填空',
+    passage: '📄 课文填空',
     listen: '🔊 听音拼写'
   };
 
@@ -27,6 +27,7 @@
     fontScale: 1,
     unitId: '',
     direction: 'en2zh',
+    lastQuizDirection: 'en2zh',
     scope: 'all',
     rangeStart: 1,
     rangeEnd: 10
@@ -219,12 +220,6 @@
     )).join('');
   }
 
-  function canFill(word) {
-    if (!word.ex) return false;
-    const target = word.blank || word.word;
-    return word.ex.toLowerCase().includes(String(target).toLowerCase());
-  }
-
   /* =========================================================
      词库构建
      ========================================================= */
@@ -240,7 +235,10 @@
       result.fontScale = clamp(Number(raw.fontScale), 0.85, 1.3);
     }
     if (typeof raw.unitId === 'string') result.unitId = raw.unitId;
-    if (['en2zh', 'zh2en', 'syn2word', 'fill', 'listen'].includes(raw.direction)) result.direction = raw.direction;
+    if (['en2zh', 'zh2en', 'syn2word', 'passage', 'listen'].includes(raw.direction)) result.direction = raw.direction;
+    if (['en2zh', 'zh2en', 'syn2word', 'listen'].includes(raw.lastQuizDirection)) {
+      result.lastQuizDirection = raw.lastQuizDirection;
+    }
     if (['all', 'first', 'second', 'range', 'wrong', 'hard', 'cards'].includes(raw.scope)) result.scope = raw.scope;
     if (Number.isFinite(Number(raw.rangeStart))) {
       result.rangeStart = Math.max(1, Math.floor(Number(raw.rangeStart)));
@@ -381,8 +379,11 @@
     } else if (!units.some(unit => unit.id === settings.unitId)) {
       settings.unitId = units[0].id;
     }
-    if (!['en2zh', 'zh2en', 'syn2word', 'fill', 'listen'].includes(settings.direction)) {
+    if (!['en2zh', 'zh2en', 'syn2word', 'passage', 'listen'].includes(settings.direction)) {
       settings.direction = 'en2zh';
+    }
+    if (!['en2zh', 'zh2en', 'syn2word', 'listen'].includes(settings.lastQuizDirection)) {
+      settings.lastQuizDirection = 'en2zh';
     }
     if (settings.scope === 'first' || settings.scope === 'second') {
       settings.scope = 'range';
@@ -428,9 +429,7 @@
       shuffle(words);
     }
 
-    if (settings.direction === 'fill') {
-      words = words.filter(canFill);
-    } else if (settings.direction === 'syn2word') {
+    if (settings.direction === 'syn2word') {
       words = words.filter(word => word.syn);
     }
 
@@ -571,7 +570,7 @@
   function cacheEls() {
     [
       'brandSub', 'btnFontMinus', 'btnFontPlus', 'btnTheme', 'btnSound', 'btnExample',
-      'btnBrowse', 'btnWrongBook', 'btnPassage', 'btnSpeed', 'btnSpeedHelp', 'btnSettings', 'unitChips', 'btnAddUnit',
+      'btnBrowse', 'btnWrongBook', 'btnSpeed', 'btnSpeedHelp', 'btnSettings', 'unitChips', 'btnAddUnit',
       'directionSelect', 'scopeSelect', 'rangePicker', 'rangeStart', 'rangeEnd', 'rangeTotal',
       'btnApplyRange', 'poolNote', 'scoreLabel', 'remainingLabel',
       'accuracyLabel', 'timeLabel', 'progressFill', 'ruleBar', 'btnRuleHelp', 'quizView', 'wordCard', 'questionTag',
@@ -626,7 +625,8 @@
     updateExampleBtn();
     bindEvents();
 
-    if (settings.scope === 'cards') startCards();
+    if (settings.direction === 'passage') startSession();
+    else if (settings.scope === 'cards') startCards();
     else startSession();
   }
 
@@ -739,9 +739,7 @@
       chip.disabled = speed;
     });
 
-    els.btnSpeed.disabled = cards;
-    els.btnPassage.disabled = speed || cards;
-    els.btnPassage.classList.toggle('active', state.passageOpen);
+    els.btnSpeed.disabled = cards || state.passageOpen;
     els.btnSpeed.classList.toggle('active', speed);
     els.btnSpeed.innerHTML = speed
       ? '⏹ <span>退出速通</span>'
@@ -923,7 +921,6 @@
     document.body.classList.remove('passage-open');
     document.body.classList.remove('cards-mode');
     els.btnBrowse.classList.remove('active');
-    els.btnPassage.classList.remove('active');
   }
 
   function showCardView() {
@@ -941,7 +938,6 @@
     document.body.classList.remove('passage-open');
     document.body.classList.add('cards-mode');
     els.btnBrowse.classList.remove('active');
-    els.btnPassage.classList.remove('active');
   }
 
   /* =========================================================
@@ -996,6 +992,13 @@
     const opts = options || {};
     clearSpeedTimer();
     stopTimer();
+
+    if (settings.direction === 'passage') {
+      state.mode = 'normal';
+      if (!state.passageOpen) openPassage();
+      else renderPassage();
+      return;
+    }
 
     if (settings.scope === 'cards') {
       settings.scope = 'all';
@@ -1064,6 +1067,10 @@
       toast('已退出速通');
       return;
     }
+    if (settings.direction === 'passage') {
+      settings.direction = settings.lastQuizDirection || 'en2zh';
+      saveSettings();
+    }
     clearSpeedTimer();
     stopTimer();
 
@@ -1120,6 +1127,11 @@
   function startCards() {
     clearSpeedTimer();
     stopTimer();
+
+    if (settings.direction === 'passage') {
+      settings.direction = settings.lastQuizDirection || 'en2zh';
+      saveSettings();
+    }
 
     state.mode = 'cards';
     state.cardQueue = shuffle(activeWords().slice());
@@ -1414,11 +1426,6 @@
       els.reviewWord.classList.add('chinese');
       if (word.ex) els.reviewExample.innerHTML = highlightText(word.ex, word.word);
       if (word.exCn) els.reviewExampleCn.textContent = word.exCn;
-    } else if (dir === 'fill') {
-      els.reviewWord.innerHTML = blankSentence(word);
-      els.reviewWord.classList.add('sentence');
-      els.reviewExample.hidden = true;
-      els.reviewExampleCn.hidden = true;
     } else if (dir === 'syn2word') {
       const prompt = word.syn || word.ch;
       els.reviewWord.textContent = prompt;
@@ -1533,13 +1540,6 @@
       els.exampleCnDisplay.hidden = true;
       els.stageHint.textContent = '根据 synonym 写出英文单词';
       els.btnSpeak.hidden = true;
-    } else if (direction === 'fill') {
-      els.wordDisplay.innerHTML = blankSentence(word);
-      els.wordDisplay.classList.add('sentence');
-      els.exampleDisplay.hidden = true;
-      els.exampleCnDisplay.hidden = true;
-      els.stageHint.textContent = '根据句意，选择正确的单词';
-      els.btnSpeak.hidden = true;
     } else {
       els.wordDisplay.textContent = '🔊';
       els.wordDisplay.classList.add('chinese');
@@ -1550,18 +1550,6 @@
     }
 
     applyExampleVisibility();
-  }
-
-  function blankSentence(word) {
-    const target = word.blank || word.word;
-    const source = word.ex || '';
-    const parts = source.split(new RegExp(`(${escapeRegExp(target)})`, 'i'));
-    if (parts.length >= 3) {
-      return parts.map((part, index) => (
-        index === 1 ? '<span class="blank">____</span>' : escapeHtml(part)
-      )).join('');
-    }
-    return `${escapeHtml(source)} <span class="blank">____</span>`;
   }
 
   function fitWordDisplay() {
@@ -2155,7 +2143,6 @@
     const unitWords = activeUnits().flatMap(unit => unit.words);
     const pool = activeWords();
     const allSlashed = unitWords.length > 0 && unitWords.every(word => progress.slashed[word.key]);
-    const hasExamples = unitWords.some(word => word.ex);
     const hasSynonyms = unitWords.some(word => word.syn);
 
     let title = '这个范围还没有单词';
@@ -2183,11 +2170,6 @@
       text = '答题时点卡片右上角的 ☆，或在单词表里点星标，就能把单词加入难词。';
       action = 'resetAll';
       label = '先做一轮全部单词';
-    } else if (settings.direction === 'fill' && unitWords.length && !hasExamples) {
-      title = '这个范围没有可用的例句';
-      text = '句子填空需要例句。可以换成「英文 → 中文」，或导入带例句的词库。';
-      action = 'en2zh';
-      label = '改用英文 → 中文';
     } else if (settings.direction === 'syn2word' && unitWords.length && !hasSynonyms) {
       title = '这个范围没有 synonym';
       text = '近义默写需要 synonym。可以换成「英文 → 中文」，或导入带 synonym 的词库。';
@@ -2368,8 +2350,8 @@
       toast('没有需要复习的卡片');
       return;
     }
-    if (settings.direction === 'fill') {
-      settings.direction = 'en2zh';
+    if (settings.direction === 'passage') {
+      settings.direction = settings.lastQuizDirection || 'en2zh';
       saveSettings();
     }
     startSession({ words, label: '没记住的卡' });
@@ -2705,7 +2687,6 @@
     document.body.classList.remove('browse-open');
     document.body.classList.remove('review-open');
     document.body.classList.remove('cards-mode');
-    els.btnPassage.classList.add('active');
     els.btnBrowse.classList.remove('active');
     renderPassage();
     updateFooterHint();
@@ -2717,21 +2698,14 @@
     state.passageOpen = false;
     els.passageView.hidden = true;
     document.body.classList.remove('passage-open');
-    els.btnPassage.classList.remove('active');
 
-    if (state.pendingRestart) {
-      state.pendingRestart = false;
-      restartForSelection();
-      return;
-    }
+    settings.direction = ['en2zh', 'zh2en', 'syn2word', 'listen'].includes(settings.lastQuizDirection)
+      ? settings.lastQuizDirection
+      : 'en2zh';
+    saveSettings();
 
-    els.quizView.hidden = false;
-    els.cardView.hidden = true;
-    els.browseView.hidden = true;
-    els.reviewView.hidden = true;
-    requestAnimationFrame(fitWordDisplay);
-    updateFooterHint();
-    updatePrevButton();
+    if (state.pendingRestart) state.pendingRestart = false;
+    restartForSelection();
   }
 
   function checkPassage() {
@@ -3076,7 +3050,7 @@
           <li>点「✗ 还没记住」会把它记进错题本，并让它本轮继续出现。</li>
           <li>按「← 上一题」可以查看上一题的作答结果，不会重新做；按「→」返回当前题。</li>
         </ul>
-        <p class="help-tip">速通（⚡）和翻卡（🃏）是另外的玩法，不受“连续答对 2 次”限制。得分和正确率统计每次作答；剩余数量统计还没完成的词。</p>
+        <p class="help-tip">速通（⚡）、翻卡（🃏）和课文填空（📄）是另外的玩法，不受“连续答对 2 次”限制。得分和正确率统计每次作答；剩余数量统计还没完成的词。</p>
       </div>
       <div class="help-actions">
         <button type="button" class="btn primary" data-close-modal>知道了</button>
@@ -3282,7 +3256,7 @@
         每行一个单词。最少写 <code>英文,中文</code>；完整格式为
         <code>word,pos,synonym,中文,例句,例句翻译</code>（第一行可写表头）。
         也支持文档里的格式：<code>word (pos.)｜synonym: …｜中文：…</code>。
-        例句可留空，但该词不会出现在「句子填空」里。
+        例句可留空；没有例句时仍可做英文→中文、中文→英文、近义默写和听音拼写。
       </div>
       <div class="parse-note" id="importPreview"></div>
       <div class="import-actions">
@@ -3749,7 +3723,6 @@
     });
 
     els.btnWrongBook.addEventListener('click', openWrongBook);
-    els.btnPassage.addEventListener('click', openPassage);
     els.btnSettings.addEventListener('click', openSettings);
 
     els.btnSpeed.addEventListener('click', () => {
@@ -3805,7 +3778,20 @@
         syncControls();
         return;
       }
-      settings.direction = els.directionSelect.value;
+
+      const next = els.directionSelect.value;
+      if (next === 'passage') {
+        if (['en2zh', 'zh2en', 'syn2word', 'listen'].includes(settings.direction)) {
+          settings.lastQuizDirection = settings.direction;
+        }
+        settings.direction = 'passage';
+        saveSettings();
+        if (!state.passageOpen) openPassage();
+        else renderPassage();
+        return;
+      }
+
+      settings.direction = next;
       saveSettings();
       startSession();
     });
