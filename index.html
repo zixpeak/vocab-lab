@@ -34,6 +34,7 @@
         <button type="button" class="icon-btn" id="btnExample" title="答题时显示 synonym 和例句" aria-label="显示或隐藏 synonym 和例句">💡 <span>提示</span></button>
         <button type="button" class="icon-btn wide" id="btnBrowse" title="查看单词表">📖 <span>单词表</span></button>
         <button type="button" class="icon-btn wide" id="btnWrongBook" title="查看错题统计">📊 <span>错题本</span></button>
+        <button type="button" class="icon-btn wide" id="btnPassage" title="课文填空">📄 <span>课文</span></button>
         <button type="button" class="icon-btn speed" id="btnSpeed" title="速通当前范围">⚡ <span>速通</span></button>
         <button type="button" class="icon-btn help" id="btnSpeedHelp" title="速通怎么玩" aria-label="速通怎么玩">？玩法</button>
         <button type="button" class="icon-btn" id="btnSettings" title="设置与数据" aria-label="设置">⚙️ <span>设置</span></button>
@@ -52,6 +53,7 @@
         <select id="directionSelect">
           <option value="en2zh">英文 → 中文</option>
           <option value="zh2en">中文 → 英文</option>
+          <option value="syn2word">近义默写</option>
           <option value="fill">句子填空</option>
           <option value="listen">🔊 听音拼写</option>
         </select>
@@ -60,12 +62,19 @@
         <label class="control-label" for="scopeSelect">范围</label>
         <select id="scopeSelect">
           <option value="all">全部单词</option>
-          <option value="first">前一半</option>
-          <option value="second">后一半</option>
+          <option value="range">自定义范围</option>
           <option value="wrong">只复习错题</option>
           <option value="hard">只复习难词</option>
           <option value="cards">🃏 翻卡自测</option>
         </select>
+      </div>
+      <div class="range-picker" id="rangePicker" hidden>
+        <span class="range-label">第</span>
+        <input type="number" id="rangeStart" min="1" inputmode="numeric" aria-label="起始序号">
+        <span class="range-dash">–</span>
+        <input type="number" id="rangeEnd" min="1" inputmode="numeric" aria-label="结束序号">
+        <span class="range-total" id="rangeTotal"></span>
+        <button type="button" class="range-apply" id="btnApplyRange">应用</button>
       </div>
       <div class="pool-note" id="poolNote">—</div>
       <div class="stats">
@@ -106,7 +115,7 @@
       <div class="options-grid" id="optionsGrid"></div>
 
       <div class="listen-panel" id="listenPanel" hidden>
-        <div class="listen-big" aria-hidden="true">🔊</div>
+        <div class="listen-big" id="listenBig" aria-hidden="true">🔊</div>
         <input type="text" id="answerInput" placeholder="输入你听到的英文…" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="输入听到的英文单词">
         <div class="listen-actions">
           <button type="button" class="btn ghost" id="btnReplay">再听一次</button>
@@ -148,6 +157,33 @@
         </div>
       </div>
     </main>
+
+    <section class="review-view" id="reviewView" hidden>
+      <div class="review-bar">
+        <span id="reviewLabel">正在查看上一题</span>
+        <button type="button" class="btn primary" id="btnReturnCurrent">返回当前题 →</button>
+      </div>
+      <div class="word-card review-card">
+        <div class="card-head">
+          <span class="question-tag" id="reviewTag">英文 → 中文</span>
+          <span class="review-status" id="reviewStatus"></span>
+        </div>
+        <div class="word-line">
+          <h2 class="word-display" id="reviewWord"></h2>
+          <button type="button" class="speak-btn" id="reviewSpeak" title="播放发音">🔊</button>
+        </div>
+        <div class="syn-display" id="reviewSyn" hidden></div>
+        <div class="word-sub" id="reviewMeta"></div>
+        <p class="example" id="reviewExample"></p>
+        <p class="example-cn" id="reviewExampleCn"></p>
+      </div>
+      <div class="options-grid" id="reviewOptions"></div>
+      <div class="review-result" id="reviewResult"></div>
+      <div class="review-actions">
+        <button type="button" class="btn ghost" id="btnReviewEarlier">← 更早</button>
+        <button type="button" class="btn primary" id="btnReturnCurrent2">返回当前题 →</button>
+      </div>
+    </section>
 
     <section class="browse-view" id="browseView" hidden>
       <div class="view-head">
@@ -201,6 +237,27 @@
       </div>
     </section>
 
+    <section class="passage-view" id="passageView" hidden>
+      <div class="view-head">
+        <div>
+          <h2>📄 课文填空</h2>
+          <p id="passageSub"></p>
+        </div>
+        <button type="button" class="btn ghost" id="btnClosePassage">返回练习</button>
+      </div>
+      <div class="passage-tabs" id="passageTabs">
+        <button type="button" data-passage-module="read" class="active">① 看课文</button>
+        <button type="button" data-passage-module="syn">② synonym 提示填词</button>
+        <button type="button" data-passage-module="hard">③ 直接填词</button>
+      </div>
+      <div class="passage-toolbar" id="passageToolbar" hidden>
+        <button type="button" class="btn primary" id="btnCheckPassage">检查答案</button>
+        <button type="button" class="btn ghost" id="btnRetryPassage">再来一次</button>
+        <span class="passage-score" id="passageScore"></span>
+      </div>
+      <div class="passage-content" id="passageContent"></div>
+    </section>
+
     <footer class="footer" id="footer">
       <span class="shortcuts" id="shortcutHint"></span>
       <div class="footer-actions">
@@ -235,6 +292,7 @@
   <input type="file" id="importFile" accept=".json,application/json" hidden>
 
   <script src="data/units.js"></script>
+  <script src="data/passages.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -14,6 +14,7 @@
   const DIR_LABELS = {
     en2zh: '英文 → 中文',
     zh2en: '中文 → 英文',
+    syn2word: '近义默写',
     fill: '句子填空',
     listen: '🔊 听音拼写'
   };
@@ -26,7 +27,9 @@
     fontScale: 1,
     unitId: '',
     direction: 'en2zh',
-    scope: 'all'
+    scope: 'all',
+    rangeStart: 1,
+    rangeEnd: 10
   };
 
   const els = {};
@@ -51,9 +54,10 @@
     ratingSnapshot: null,
     round: null,
     lastAnswerCorrect: null,
-    history: [],
-    currentSnapshot: null,
-    currentSnapshotPushed: false,
+    currentSerial: 0,
+    answerHistory: [],
+    reviewMode: false,
+    reviewIndex: -1,
     sessionWrong: new Set(),
     sessionLabel: '',
     startTime: 0,
@@ -75,7 +79,11 @@
     lastSpokenCard: -1,
     browseOpen: false,
     browseShowSlashed: false,
-    preBrowseMode: 'normal'
+    preBrowseMode: 'normal',
+    passageOpen: false,
+    passageModule: 'read',
+    passageTargets: [],
+    prePassageMode: 'normal'
   };
 
   /* =========================================================
@@ -232,8 +240,14 @@
       result.fontScale = clamp(Number(raw.fontScale), 0.85, 1.3);
     }
     if (typeof raw.unitId === 'string') result.unitId = raw.unitId;
-    if (['en2zh', 'zh2en', 'fill', 'listen'].includes(raw.direction)) result.direction = raw.direction;
-    if (['all', 'first', 'second', 'wrong', 'hard', 'cards'].includes(raw.scope)) result.scope = raw.scope;
+    if (['en2zh', 'zh2en', 'syn2word', 'fill', 'listen'].includes(raw.direction)) result.direction = raw.direction;
+    if (['all', 'first', 'second', 'range', 'wrong', 'hard', 'cards'].includes(raw.scope)) result.scope = raw.scope;
+    if (Number.isFinite(Number(raw.rangeStart))) {
+      result.rangeStart = Math.max(1, Math.floor(Number(raw.rangeStart)));
+    }
+    if (Number.isFinite(Number(raw.rangeEnd))) {
+      result.rangeEnd = Math.max(1, Math.floor(Number(raw.rangeEnd)));
+    }
     return result;
   }
 
@@ -367,10 +381,13 @@
     } else if (!units.some(unit => unit.id === settings.unitId)) {
       settings.unitId = units[0].id;
     }
-    if (!['en2zh', 'zh2en', 'fill', 'listen'].includes(settings.direction)) {
+    if (!['en2zh', 'zh2en', 'syn2word', 'fill', 'listen'].includes(settings.direction)) {
       settings.direction = 'en2zh';
     }
-    if (!['all', 'first', 'second', 'wrong', 'hard', 'cards'].includes(settings.scope)) {
+    if (settings.scope === 'first' || settings.scope === 'second') {
+      settings.scope = 'range';
+    }
+    if (!['all', 'range', 'wrong', 'hard', 'cards'].includes(settings.scope)) {
       settings.scope = 'all';
     }
   }
@@ -394,9 +411,8 @@
     let words = activeWords().slice();
     const scope = settings.scope;
 
-    if (scope === 'first' || scope === 'second') {
-      const half = Math.ceil(words.length / 2);
-      words = scope === 'first' ? words.slice(0, half) : words.slice(half);
+    if (scope === 'range') {
+      words = getRangeInfo().words.slice();
     }
 
     if (scope === 'wrong') {
@@ -414,6 +430,8 @@
 
     if (settings.direction === 'fill') {
       words = words.filter(canFill);
+    } else if (settings.direction === 'syn2word') {
+      words = words.filter(word => word.syn);
     }
 
     return words;
@@ -423,88 +441,84 @@
     return shuffle(buildQueue());
   }
 
-  function cloneProgressState(source) {
+  function getRangeInfo() {
+    const pool = activeWords();
+    const total = pool.length;
+    const start = clamp(parseInt(settings.rangeStart, 10) || 1, 1, Math.max(1, total));
+    const end = clamp(
+      parseInt(settings.rangeEnd, 10) || Math.max(1, total),
+      start,
+      Math.max(1, total)
+    );
     return {
-      wrong: { ...source.wrong },
-      mastered: { ...source.mastered },
-      hard: { ...source.hard },
-      slashed: { ...source.slashed }
+      pool,
+      total,
+      start,
+      end,
+      words: pool.slice(start - 1, end)
     };
   }
 
-  function cloneRoundState(round) {
-    if (!round) return null;
-    const copy = new Map();
-    round.forEach((entry, key) => {
-      copy.set(key, {
-        word: entry.word,
-        streak: entry.streak,
-        done: entry.done
-      });
-    });
-    return copy;
+  function syncRangePicker() {
+    if (!els.rangePicker) return;
+    els.rangePicker.hidden = settings.scope !== 'range';
+    if (settings.scope !== 'range') return;
+
+    const info = getRangeInfo();
+    els.rangeStart.max = String(Math.max(1, info.total));
+    els.rangeEnd.max = String(Math.max(1, info.total));
+    els.rangeStart.value = String(info.start);
+    els.rangeEnd.value = String(info.end);
+    els.rangeTotal.textContent = `/ ${info.total}`;
+
+    if (settings.rangeStart !== info.start || settings.rangeEnd !== info.end) {
+      settings.rangeStart = info.start;
+      settings.rangeEnd = info.end;
+      saveSettings();
+    }
   }
 
-  function captureSessionSnapshot(question) {
-    return {
-      queue: state.queue.slice(),
-      qIndex: state.qIndex,
-      score: state.score,
-      attempted: state.attempted,
-      sessionWrong: Array.from(state.sessionWrong),
-      round: cloneRoundState(state.round),
-      progress: cloneProgressState(progress),
-      question
-    };
+  function applyRange() {
+    const info = getRangeInfo();
+    const total = Math.max(1, info.total);
+    let start = parseInt(els.rangeStart.value, 10);
+    let end = parseInt(els.rangeEnd.value, 10);
+    if (!Number.isFinite(start)) start = 1;
+    if (!Number.isFinite(end)) end = total;
+    start = clamp(start, 1, total);
+    end = clamp(end, start, total);
+
+    settings.rangeStart = start;
+    settings.rangeEnd = end;
+    settings.scope = 'range';
+    saveSettings();
+    syncRangePicker();
+    syncControls();
+    startSession();
+    toast(`本轮范围：第 ${start}–${end} 个`);
   }
 
-  function restoreSessionSnapshot(snapshot) {
-    state.queue = snapshot.queue.slice();
-    state.qIndex = snapshot.qIndex;
-    state.score = snapshot.score;
-    state.attempted = snapshot.attempted;
-    state.sessionWrong = new Set(snapshot.sessionWrong);
-    state.round = cloneRoundState(snapshot.round);
-    progress = cloneProgressState(snapshot.progress);
-    state.finished = false;
-    state.finishWasSpeed = false;
-    state.isEmpty = false;
-    state.answered = false;
-    state.current = null;
-    state.rating = null;
-    state.ratingSnapshot = null;
-    state.lastAnswerCorrect = null;
-    state.currentSnapshot = null;
-    state.currentSnapshotPushed = false;
-    saveProgress();
-  }
-
-  function rememberCurrentQuestion() {
-    if (state.mode !== 'normal' || state.currentSnapshotPushed || !state.currentSnapshot) return;
-    state.history.push(state.currentSnapshot);
-    state.currentSnapshotPushed = true;
-    updatePrevButton();
+  function previousReviewIndex() {
+    if (!state.answerHistory.length) return -1;
+    const currentRecorded = state.answered &&
+      state.answerHistory[state.answerHistory.length - 1].serial === state.currentSerial;
+    const index = state.answerHistory.length - (currentRecorded ? 2 : 1);
+    return index >= 0 ? index : -1;
   }
 
   function updatePrevButton() {
-    const enabled = state.mode === 'normal' && !state.isEmpty && state.history.length > 0;
-    if (els.btnPrev) els.btnPrev.disabled = !enabled;
+    if (!els.btnPrev) return;
+    if (state.reviewMode) {
+      els.btnPrev.disabled = state.reviewIndex <= 0;
+      return;
+    }
+    const enabled = state.mode === 'normal' && !state.isEmpty && previousReviewIndex() >= 0;
+    els.btnPrev.disabled = !enabled;
   }
 
   function updateRuleBar() {
     if (!els.ruleBar) return;
     els.ruleBar.hidden = !(state.mode === 'normal' && !state.finished && !state.isEmpty);
-  }
-
-  function goToPreviousQuestion() {
-    if (state.mode !== 'normal' || !state.history.length) return;
-    clearSpeedTimer();
-    const snapshot = state.history.pop();
-    restoreSessionSnapshot(snapshot);
-    showQuizView();
-    syncControls();
-    showQuestion(snapshot.question);
-    updatePrevButton();
   }
 
   function allRoundDone() {
@@ -557,17 +571,24 @@
   function cacheEls() {
     [
       'brandSub', 'btnFontMinus', 'btnFontPlus', 'btnTheme', 'btnSound', 'btnExample',
-      'btnBrowse', 'btnWrongBook', 'btnSpeed', 'btnSpeedHelp', 'btnSettings', 'unitChips', 'btnAddUnit',
-      'directionSelect', 'scopeSelect', 'poolNote', 'scoreLabel', 'remainingLabel',
+      'btnBrowse', 'btnWrongBook', 'btnPassage', 'btnSpeed', 'btnSpeedHelp', 'btnSettings', 'unitChips', 'btnAddUnit',
+      'directionSelect', 'scopeSelect', 'rangePicker', 'rangeStart', 'rangeEnd', 'rangeTotal',
+      'btnApplyRange', 'poolNote', 'scoreLabel', 'remainingLabel',
       'accuracyLabel', 'timeLabel', 'progressFill', 'ruleBar', 'btnRuleHelp', 'quizView', 'wordCard', 'questionTag',
       'btnHard', 'btnSlash', 'wordDisplay', 'synDisplay', 'btnSpeak', 'wordMeta', 'exampleDisplay',
-      'exampleCnDisplay', 'stageHint', 'optionsGrid', 'listenPanel', 'answerInput',
+      'exampleCnDisplay', 'stageHint', 'optionsGrid', 'listenPanel', 'listenBig', 'answerInput',
       'btnReplay', 'btnSubmitAnswer', 'inputFeedback', 'resultPanel', 'resultMark',
       'resultText', 'resultDetail', 'rateRow', 'rateHint', 'btnForgot', 'btnKnown', 'btnNext',
       'emptyState', 'emptyTitle', 'emptyText', 'btnEmptyReset', 'finishPanel', 'finishIcon',
       'finishTitle', 'finishSub', 'finishStats', 'btnFinishAgain', 'btnFinishWrong',
       'btnFinishBrowse', 'browseView', 'browseSub', 'btnCloseBrowse', 'browseSearch',
-      'browseShowSlashed', 'browseList', 'cardView', 'cardMetaLeft', 'cardMetaRight',
+      'browseShowSlashed', 'browseList', 'reviewView', 'reviewLabel', 'reviewTag',
+      'reviewStatus', 'reviewWord', 'reviewSpeak', 'reviewSyn', 'reviewMeta',
+      'reviewExample', 'reviewExampleCn', 'reviewOptions', 'reviewResult',
+      'btnReviewEarlier', 'btnReturnCurrent', 'btnReturnCurrent2',
+      'passageView', 'passageSub', 'passageTabs', 'passageToolbar', 'passageContent',
+      'passageScore', 'btnClosePassage', 'btnCheckPassage', 'btnRetryPassage',
+      'cardView', 'cardMetaLeft', 'cardMetaRight',
       'flipCard', 'cardFrontWord', 'cardFrontPos', 'btnCardSpeak', 'cardBackCh',
       'cardBackSyn', 'cardBackEx', 'cardBackExCn', 'cardRate', 'btnCardForgot',
       'btnCardKnown', 'cardDone', 'cardDoneStats', 'btnCardAgain', 'btnCardReviewForgot',
@@ -711,11 +732,16 @@
     els.directionSelect.disabled = speed || cards;
     els.scopeSelect.disabled = speed;
     els.btnAddUnit.disabled = speed;
+    els.rangeStart.disabled = speed;
+    els.rangeEnd.disabled = speed;
+    els.btnApplyRange.disabled = speed;
     els.unitChips.querySelectorAll('.unit-chip').forEach(chip => {
       chip.disabled = speed;
     });
 
     els.btnSpeed.disabled = cards;
+    els.btnPassage.disabled = speed || cards;
+    els.btnPassage.classList.toggle('active', state.passageOpen);
     els.btnSpeed.classList.toggle('active', speed);
     els.btnSpeed.innerHTML = speed
       ? '⏹ <span>退出速通</span>'
@@ -730,6 +756,7 @@
     document.body.classList.toggle('cards-mode', cards);
 
     updateRuleBar();
+    syncRangePicker();
     updateSoundBtn();
     updateThemeBtn();
     updateExampleBtn();
@@ -843,6 +870,11 @@
       return;
     }
     const total = state.round ? state.round.size : 0;
+    if (settings.scope === 'range' && total) {
+      const info = getRangeInfo();
+      els.poolNote.textContent = `本轮 ${total} 词 · 第 ${info.start}–${info.end} 个${state.sessionLabel ? ` · ${state.sessionLabel}` : ''}`;
+      return;
+    }
     els.poolNote.textContent = total
       ? `本轮 ${total} 词${state.sessionLabel ? ` · ${state.sessionLabel}` : ''}`
       : `本范围 ${activeWords().length} 词`;
@@ -851,13 +883,21 @@
   function updateFooterHint() {
     const kbd = key => `<kbd>${key}</kbd>`;
     let hint;
-    if (state.mode === 'cards') {
+    if (state.reviewMode) {
+      hint = `已答题回顾：${kbd('←')} 更早 · ${kbd('→')} 返回当前题`;
+    } else if (state.mode === 'cards') {
       hint = `空格 / 点击翻面 · ${kbd('1')} 没记住 · ${kbd('2')} 学会了 · ${kbd('S')} 发音`;
     } else if (state.mode === 'speed') {
-      const canSpeak = settings.direction === 'en2zh' || settings.direction === 'listen';
-      hint = `⚡ 速通中：${kbd('1')}–${kbd('4')} 选择 · 答完自动下一题${canSpeak ? ` · ${kbd('S')} 发音` : ''}`;
+      if (settings.direction === 'listen' || settings.direction === 'syn2word') {
+        hint = `⚡ 速通中：输入答案按 ${kbd('Enter')} 提交 · 答完自动下一题`;
+      } else {
+        const canSpeak = settings.direction === 'en2zh';
+        hint = `⚡ 速通中：${kbd('1')}–${kbd('4')} 选择 · 答完自动下一题${canSpeak ? ` · ${kbd('S')} 发音` : ''}`;
+      }
     } else if (settings.direction === 'listen') {
       hint = `输入答案后按 ${kbd('Enter')} 提交 · ${kbd('←')} 上一题 · ${kbd('S')} 重听发音`;
+    } else if (settings.direction === 'syn2word') {
+      hint = `看 synonym 输入英文 · ${kbd('Enter')} 提交 · ${kbd('←')} 上一题`;
     } else {
       const canSpeak = settings.direction === 'en2zh';
       hint = `快捷键：${kbd('1')}–${kbd('4')} 选择 · ${kbd('Enter')} 下一题 · ${kbd('←')} 上一题${canSpeak ? ` · ${kbd('S')} 发音` : ''} · ${kbd('H')} 标记难词`;
@@ -870,22 +910,38 @@
 
   function showQuizView() {
     state.browseOpen = false;
+    state.reviewMode = false;
+    state.reviewIndex = -1;
+    state.passageOpen = false;
     els.browseView.hidden = true;
+    els.reviewView.hidden = true;
+    els.passageView.hidden = true;
     els.cardView.hidden = true;
     els.quizView.hidden = false;
     document.body.classList.remove('browse-open');
+    document.body.classList.remove('review-open');
+    document.body.classList.remove('passage-open');
     document.body.classList.remove('cards-mode');
     els.btnBrowse.classList.remove('active');
+    els.btnPassage.classList.remove('active');
   }
 
   function showCardView() {
     state.browseOpen = false;
+    state.reviewMode = false;
+    state.reviewIndex = -1;
+    state.passageOpen = false;
     els.browseView.hidden = true;
+    els.reviewView.hidden = true;
+    els.passageView.hidden = true;
     els.quizView.hidden = true;
     els.cardView.hidden = false;
     document.body.classList.remove('browse-open');
+    document.body.classList.remove('review-open');
+    document.body.classList.remove('passage-open');
     document.body.classList.add('cards-mode');
     els.btnBrowse.classList.remove('active');
+    els.btnPassage.classList.remove('active');
   }
 
   /* =========================================================
@@ -954,9 +1010,10 @@
         state.round.set(word.key, { word, streak: 0, done: false });
       }
     });
-    state.history = [];
-    state.currentSnapshot = null;
-    state.currentSnapshotPushed = false;
+    state.currentSerial = 0;
+    state.answerHistory = [];
+    state.reviewMode = false;
+    state.reviewIndex = -1;
     state.lastAnswerCorrect = null;
     state.qIndex = 0;
     state.score = 0;
@@ -1013,9 +1070,10 @@
     state.mode = 'speed';
     state.queue = speedPool();
     state.round = null;
-    state.history = [];
-    state.currentSnapshot = null;
-    state.currentSnapshotPushed = false;
+    state.currentSerial = 0;
+    state.answerHistory = [];
+    state.reviewMode = false;
+    state.reviewIndex = -1;
     state.lastAnswerCorrect = null;
     state.qIndex = 0;
     state.score = 0;
@@ -1066,9 +1124,10 @@
     state.mode = 'cards';
     state.cardQueue = shuffle(activeWords().slice());
     state.round = null;
-    state.history = [];
-    state.currentSnapshot = null;
-    state.currentSnapshotPushed = false;
+    state.currentSerial = 0;
+    state.answerHistory = [];
+    state.reviewMode = false;
+    state.reviewIndex = -1;
     state.lastAnswerCorrect = null;
     state.cardIndex = 0;
     state.cardKnown = 0;
@@ -1164,7 +1223,7 @@
     return picked;
   }
 
-  function showQuestion(restoredQuestion) {
+  function showQuestion() {
     if (state.mode === 'cards') return;
     clearSpeedTimer();
     blurActive();
@@ -1179,15 +1238,16 @@
       return;
     }
 
-    const word = restoredQuestion ? restoredQuestion.word : state.queue[state.qIndex];
-    const question = restoredQuestion || makeQuestion(word);
+    const word = state.queue[state.qIndex];
+    const question = makeQuestion(word);
     state.current = question;
+    state.currentSerial += 1;
     state.answered = false;
     state.rating = null;
     state.ratingSnapshot = null;
     state.lastAnswerCorrect = null;
-    state.currentSnapshot = captureSessionSnapshot(question);
-    state.currentSnapshotPushed = false;
+    state.reviewMode = false;
+    state.reviewIndex = -1;
     state.isEmpty = false;
 
     els.wordCard.hidden = false;
@@ -1220,9 +1280,15 @@
     void els.wordCard.offsetWidth;
     els.wordCard.classList.add('enter');
 
-    if (question.direction === 'listen') {
+    const isTypedQuestion = question.direction === 'listen' || question.direction === 'syn2word';
+    if (isTypedQuestion) {
       els.optionsGrid.hidden = true;
       els.listenPanel.hidden = false;
+      els.btnReplay.hidden = question.direction !== 'listen';
+      els.listenBig.textContent = question.direction === 'listen' ? '🔊' : '✍️';
+      els.answerInput.placeholder = question.direction === 'listen'
+        ? '输入你听到的英文…'
+        : '根据 synonym 写出英文单词…';
       updateStats();
       updateProgress();
       updatePoolNote();
@@ -1230,12 +1296,13 @@
       setTimeout(() => {
         if (state.current === question && !state.answered) {
           els.answerInput.focus({ preventScroll: true });
-          speak(word.word);
+          if (question.direction === 'listen') speak(word.word);
         }
       }, 160);
     } else {
       renderOptions(question);
       els.listenPanel.hidden = true;
+      els.btnReplay.hidden = false;
       updateStats();
       updateProgress();
       updatePoolNote();
@@ -1246,6 +1313,168 @@
         }, 220);
       }
     }
+  }
+
+  function openReviewAt(index) {
+    if (state.mode !== 'normal' || !state.answerHistory.length) return;
+    if (index < 0 || index >= state.answerHistory.length) return;
+
+    clearSpeedTimer();
+    cancelSpeech();
+    state.reviewMode = true;
+    state.reviewIndex = index;
+    els.quizView.hidden = true;
+    els.cardView.hidden = true;
+    els.browseView.hidden = true;
+    els.reviewView.hidden = false;
+    document.body.classList.add('review-open');
+    document.body.classList.remove('browse-open');
+    document.body.classList.remove('cards-mode');
+    els.btnBrowse.classList.remove('active');
+    renderReview();
+    updatePrevButton();
+    updateFooterHint();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function goBackReview() {
+    if (state.reviewMode) {
+      if (state.reviewIndex > 0) {
+        state.reviewIndex--;
+        renderReview();
+        updatePrevButton();
+        updateFooterHint();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+      return;
+    }
+    if (state.mode !== 'normal') return;
+    const index = previousReviewIndex();
+    if (index >= 0) openReviewAt(index);
+  }
+
+  function returnToCurrent() {
+    if (!state.reviewMode) return;
+    state.reviewMode = false;
+    state.reviewIndex = -1;
+    els.reviewView.hidden = true;
+    document.body.classList.remove('review-open');
+    els.quizView.hidden = false;
+    els.cardView.hidden = true;
+    updatePrevButton();
+    updateFooterHint();
+    requestAnimationFrame(fitWordDisplay);
+  }
+
+  function renderReview() {
+    const record = state.answerHistory[state.reviewIndex];
+    if (!record) {
+      returnToCurrent();
+      return;
+    }
+
+    const q = record.question;
+    const word = record.word;
+    const dir = q.direction;
+
+    els.reviewLabel.textContent = `已答题回顾 · 第 ${state.reviewIndex + 1} / ${state.answerHistory.length} 题`;
+    els.reviewTag.textContent = DIR_LABELS[dir] || dir;
+    const ratingText = record.rating === 'known'
+      ? '已学会'
+      : record.rating === 'forgot' ? '已加入错题本' : '未评价';
+    els.reviewStatus.textContent = `${record.isCorrect ? '✓ 答对了' : '✗ 答错了'} · ${ratingText}`;
+    els.reviewStatus.className = `review-status ${record.isCorrect ? 'good' : 'bad'}`;
+
+    els.reviewWord.className = 'word-display';
+    els.reviewWord.style.fontSize = '';
+    els.reviewWord.style.whiteSpace = '';
+    els.reviewWord.style.maxWidth = '';
+    els.reviewSyn.hidden = true;
+    els.reviewSyn.innerHTML = '';
+    els.reviewExample.hidden = false;
+    els.reviewExampleCn.hidden = false;
+    els.reviewExample.textContent = '';
+    els.reviewExampleCn.textContent = '';
+    els.reviewOptions.innerHTML = '';
+    els.reviewOptions.hidden = false;
+
+    const posHtml = word.pos ? `<span class="pos-badge">${escapeHtml(word.pos)}</span>` : '';
+    els.reviewMeta.innerHTML = `${posHtml}<span class="unit-badge">${escapeHtml(word.unitTitle)}</span>`;
+
+    if (dir === 'en2zh') {
+      els.reviewWord.textContent = word.word;
+      if (word.syn) {
+        els.reviewSyn.innerHTML = `<span class="syn-label">近义</span>${escapeHtml(word.syn)}`;
+        els.reviewSyn.hidden = false;
+      }
+      if (word.ex) els.reviewExample.innerHTML = highlightText(word.ex, word.word);
+      if (word.exCn) els.reviewExampleCn.textContent = word.exCn;
+    } else if (dir === 'zh2en') {
+      els.reviewWord.textContent = word.ch;
+      els.reviewWord.classList.add('chinese');
+      if (word.ex) els.reviewExample.innerHTML = highlightText(word.ex, word.word);
+      if (word.exCn) els.reviewExampleCn.textContent = word.exCn;
+    } else if (dir === 'fill') {
+      els.reviewWord.innerHTML = blankSentence(word);
+      els.reviewWord.classList.add('sentence');
+      els.reviewExample.hidden = true;
+      els.reviewExampleCn.hidden = true;
+    } else if (dir === 'syn2word') {
+      const prompt = word.syn || word.ch;
+      els.reviewWord.textContent = prompt;
+      els.reviewWord.classList.add('synonym-prompt');
+      if (prompt.length > 42) {
+        els.reviewWord.style.fontSize = `calc(${prompt.length > 60 ? 18 : 22}px * var(--scale))`;
+      }
+      els.reviewExample.hidden = true;
+      els.reviewExampleCn.hidden = true;
+    } else {
+      els.reviewWord.textContent = '🔊 听音拼写';
+      els.reviewWord.classList.add('chinese');
+      els.reviewExample.hidden = true;
+      els.reviewExampleCn.hidden = true;
+    }
+
+    const typed = dir === 'listen' || dir === 'syn2word';
+    if (typed) {
+      els.reviewOptions.hidden = true;
+    } else {
+      els.reviewOptions.hidden = false;
+      els.reviewOptions.innerHTML = q.options.map((option, index) => {
+        let className = 'option-btn';
+        if (index === q.correctIndex) className += ' correct';
+        else if (index === record.chosenIndex) className += ' wrong';
+        else className += ' dim';
+        return `<button type="button" class="${className}" disabled><span class="option-key">${'ABCD'[index] || index + 1}</span><span class="option-text">${escapeHtml(option)}</span></button>`;
+      }).join('');
+    }
+
+    const answerLine = record.chosenIndex != null
+      ? `你的选择：${q.options[record.chosenIndex] || '—'}`
+      : record.typedAnswer ? `你的输入：${record.typedAnswer}` : '';
+    const correctLine = typed ? `正确答案：${word.word}` : '';
+    const synLine = word.syn ? `近义：${word.syn}` : '';
+    const exampleLine = word.ex ? highlightText(word.ex, word.word) : '';
+    const exampleCnLine = word.exCn ? `<span class="detail-cn">${escapeHtml(word.exCn)}</span>` : '';
+
+    els.reviewResult.innerHTML = `
+      <div class="review-result-head ${record.isCorrect ? 'good' : 'bad'}">
+        <span class="review-mark">${record.isCorrect ? '✓' : '✗'}</span>
+        <span>${record.isCorrect ? '这道题答对了' : '这道题答错了'}</span>
+        <span class="review-rating">评价：${ratingText}</span>
+      </div>
+      <div class="review-result-detail">
+        <strong>${escapeHtml(word.word)}</strong> ${posHtml} · ${escapeHtml(word.ch)}
+        ${synLine ? `<span class="review-line">${escapeHtml(synLine)}</span>` : ''}
+        ${answerLine ? `<span class="review-line">${escapeHtml(answerLine)}</span>` : ''}
+        ${correctLine ? `<span class="review-line">${escapeHtml(correctLine)}</span>` : ''}
+        ${exampleLine ? `<span class="review-line">${exampleLine}</span>` : ''}
+        ${exampleCnLine}
+      </div>
+    `;
+
+    els.btnReviewEarlier.disabled = state.reviewIndex <= 0;
+    updatePrevButton();
   }
 
   function renderQuestionContent(question) {
@@ -1292,6 +1521,17 @@
         els.exampleCnDisplay.hidden = true;
       }
       els.stageHint.textContent = '请选择对应的英文单词';
+      els.btnSpeak.hidden = true;
+    } else if (direction === 'syn2word') {
+      const prompt = word.syn || word.ch;
+      els.wordDisplay.textContent = prompt;
+      els.wordDisplay.classList.add('synonym-prompt');
+      if (prompt.length > 42) {
+        els.wordDisplay.style.fontSize = `calc(${prompt.length > 60 ? 20 : 24}px * var(--scale))`;
+      }
+      els.exampleDisplay.hidden = true;
+      els.exampleCnDisplay.hidden = true;
+      els.stageHint.textContent = '根据 synonym 写出英文单词';
       els.btnSpeak.hidden = true;
     } else if (direction === 'fill') {
       els.wordDisplay.innerHTML = blankSentence(word);
@@ -1394,7 +1634,7 @@
 
   function selectOption(index) {
     if (state.mode === 'cards' || state.finished || state.answered || !state.current) return;
-    if (state.current.direction === 'listen') return;
+    if (state.current.direction === 'listen' || state.current.direction === 'syn2word') return;
     if (!Number.isInteger(index) || index < 0 || index >= state.current.options.length) return;
 
     const question = state.current;
@@ -1402,12 +1642,12 @@
     const buttons = Array.from(els.optionsGrid.querySelectorAll('.option-btn'));
     if (!buttons.length) return;
 
-    rememberCurrentQuestion();
     state.answered = true;
     state.attempted++;
 
     const isCorrect = index === question.correctIndex;
     state.lastAnswerCorrect = isCorrect;
+    recordAnswer({ chosenIndex: index, isCorrect });
     buttons.forEach((button, buttonIndex) => {
       button.disabled = true;
       if (buttonIndex === question.correctIndex) button.classList.add('correct');
@@ -1444,7 +1684,7 @@
 
   function submitTyped() {
     if (state.mode === 'cards' || state.answered || !state.current) return;
-    if (state.current.direction !== 'listen') return;
+    if (!['listen', 'syn2word'].includes(state.current.direction)) return;
 
     const value = els.answerInput.value.trim();
     if (!value) {
@@ -1459,10 +1699,10 @@
     const normalized = normalizeAnswer(value);
     const isCorrect = expected.some(answer => normalizeAnswer(answer) === normalized);
 
-    rememberCurrentQuestion();
     state.answered = true;
     state.attempted++;
     state.lastAnswerCorrect = isCorrect;
+    recordAnswer({ typedAnswer: value, isCorrect });
     els.answerInput.disabled = true;
     els.btnSubmitAnswer.disabled = true;
     blurActive();
@@ -1501,6 +1741,35 @@
       if (item) values.add(String(item));
     });
     return Array.from(values);
+  }
+
+  function recordAnswer(details) {
+    if (state.mode !== 'normal' || !state.current) return;
+    if (
+      state.answerHistory.length &&
+      state.answerHistory[state.answerHistory.length - 1].serial === state.currentSerial
+    ) {
+      return;
+    }
+
+    state.answerHistory.push({
+      serial: state.currentSerial,
+      question: state.current,
+      word: state.current.word,
+      chosenIndex: details.chosenIndex == null ? null : details.chosenIndex,
+      typedAnswer: details.typedAnswer || '',
+      isCorrect: !!details.isCorrect,
+      rating: null,
+      hintsHidden: settings.hideExamples
+    });
+    updatePrevButton();
+  }
+
+  function syncCurrentRecordRating() {
+    const record = state.answerHistory[state.answerHistory.length - 1];
+    if (record && record.serial === state.currentSerial) {
+      record.rating = state.rating;
+    }
   }
 
   function addWrong(word) {
@@ -1634,6 +1903,7 @@
     }
 
     if (isCancel) {
+      syncCurrentRecordRating();
       updateRateButtons();
       updateResultHint();
       updateStats();
@@ -1664,6 +1934,7 @@
       toast('已加入错题本，本轮还会再考');
     }
     state.rating = wanted;
+    syncCurrentRecordRating();
     saveProgress();
     updateRateButtons();
     updateResultHint();
@@ -1885,6 +2156,7 @@
     const pool = activeWords();
     const allSlashed = unitWords.length > 0 && unitWords.every(word => progress.slashed[word.key]);
     const hasExamples = unitWords.some(word => word.ex);
+    const hasSynonyms = unitWords.some(word => word.syn);
 
     let title = '这个范围还没有单词';
     let text = '换一个单元，或返回全部单词试试。';
@@ -1914,6 +2186,11 @@
     } else if (settings.direction === 'fill' && unitWords.length && !hasExamples) {
       title = '这个范围没有可用的例句';
       text = '句子填空需要例句。可以换成「英文 → 中文」，或导入带例句的词库。';
+      action = 'en2zh';
+      label = '改用英文 → 中文';
+    } else if (settings.direction === 'syn2word' && unitWords.length && !hasSynonyms) {
+      title = '这个范围没有 synonym';
+      text = '近义默写需要 synonym。可以换成「英文 → 中文」，或导入带 synonym 的词库。';
       action = 'en2zh';
       label = '改用英文 → 中文';
     } else if (!pool.length) {
@@ -2109,12 +2386,14 @@
     }
     blurActive();
     cancelSpeech();
-    state.preBrowseMode = state.mode;
+    state.preBrowseMode = state.passageOpen ? 'passage' : state.reviewMode ? 'review' : state.mode;
     state.browseOpen = true;
     pauseSpeedTimer();
 
     els.quizView.hidden = true;
     els.cardView.hidden = true;
+    els.reviewView.hidden = true;
+    els.passageView.hidden = true;
     els.browseView.hidden = false;
     document.body.classList.add('browse-open');
     els.btnBrowse.classList.add('active');
@@ -2133,6 +2412,24 @@
     if (state.pendingRestart) {
       state.pendingRestart = false;
       restartForSelection();
+      return;
+    }
+
+    if (state.passageOpen) {
+      els.passageView.hidden = false;
+      els.quizView.hidden = true;
+      els.cardView.hidden = true;
+      els.reviewView.hidden = true;
+      updateFooterHint();
+      return;
+    }
+
+    if (state.reviewMode) {
+      els.reviewView.hidden = false;
+      els.quizView.hidden = true;
+      els.cardView.hidden = true;
+      updatePrevButton();
+      updateFooterHint();
       return;
     }
 
@@ -2275,6 +2572,205 @@
         });
       }
     }
+  }
+
+  /* =========================================================
+     课文填空
+     ========================================================= */
+
+  function getPassageData() {
+    if (!window.VOCAB_PASSAGES) return null;
+    const candidates = settings.unitId === 'all' ? units : activeUnits();
+    const unit = candidates.find(item => window.VOCAB_PASSAGES[item.id]);
+    if (!unit) return null;
+    return { unit, passage: window.VOCAB_PASSAGES[unit.id] };
+  }
+
+  function passageSynHint(synonym) {
+    let hint = String(synonym || '').trim();
+    if (hint.length > 42 && hint.includes('/')) {
+      hint = hint.split('/')[0].trim();
+    }
+    if (hint.length > 58) {
+      hint = `${hint.slice(0, 55).trim()}…`;
+    }
+    return hint;
+  }
+
+  function renderPassageParagraph(text, lookup, unit) {
+    const isRead = state.passageModule === 'read';
+    return text.replace(/[（(]([^（）()]+)[）)]/g, (full, inner) => {
+      const surface = inner.trim();
+      const target = lookup.get(normalizeKey(surface));
+      if (!target) return escapeHtml(full);
+
+      if (isRead) {
+        return `<strong class="passage-target">${escapeHtml(surface)}</strong>`;
+      }
+
+      const entry = unit.words.find(word => word.word === target.word);
+      const accepted = new Set([surface]);
+      if (entry) {
+        acceptedAnswers(entry).forEach(answer => accepted.add(answer));
+      }
+
+      const index = state.passageTargets.length;
+      state.passageTargets.push({
+        surface,
+        word: entry ? entry.word : target.word,
+        syn: entry ? entry.syn : '',
+        accepted: Array.from(accepted)
+      });
+
+      const width = Math.max(70, Math.min(240, surface.length * 9 + 24));
+      const syn = entry && entry.syn ? entry.syn : '';
+      const hint = passageSynHint(syn);
+      const synHtml = state.passageModule === 'syn' && hint
+        ? `<span class="passage-syn">(${escapeHtml(hint)})</span>`
+        : '';
+      return `<span class="passage-blank" data-index="${index}"><input class="passage-input" data-index="${index}" type="text" style="width:${width}px" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="第 ${index + 1} 空">${synHtml}<span class="passage-answer" hidden></span></span>`;
+    });
+  }
+
+  function renderPassage() {
+    const data = getPassageData();
+    const module = state.passageModule;
+    state.passageTargets = [];
+
+    els.passageTabs.querySelectorAll('[data-passage-module]').forEach(button => {
+      button.classList.toggle('active', button.dataset.passageModule === module);
+    });
+    els.passageScore.textContent = '';
+    els.passageScore.classList.remove('good', 'bad');
+
+    if (!data) {
+      els.passageSub.textContent = '这个单元还没有课文';
+      els.passageTabs.hidden = true;
+      els.passageToolbar.hidden = true;
+      els.passageContent.innerHTML = '<div class="empty-block"><span class="big">📄</span>这个单元还没有课文。<br>可以先做单词练习，或导入带课文的内容。</div>';
+      return;
+    }
+
+    const { unit, passage } = data;
+    els.passageTabs.hidden = false;
+    els.passageSub.textContent = `${unit.title} · ${passage.title} · ${passage.targets.length} 个生词`;
+    els.passageToolbar.hidden = module === 'read';
+
+    const lookup = new Map();
+    passage.targets.forEach(target => {
+      lookup.set(normalizeKey(target.surface), target);
+    });
+
+    const paragraphs = passage.paragraphs
+      .map(paragraph => `<p>${renderPassageParagraph(paragraph, lookup, unit)}</p>`)
+      .join('');
+
+    let note = '';
+    if (module === 'read') {
+      note = '<p class="passage-note">加粗的单词是本单元的生词。读一遍，再去填词。</p>';
+    } else if (module === 'syn') {
+      note = '<p class="passage-note">根据括号里的 synonym，把英文单词填进空格。</p>';
+    } else {
+      note = '<p class="passage-note">根据上下文，把英文单词填进空格。填完点「检查答案」。</p>';
+    }
+
+    els.passageContent.innerHTML = note + paragraphs;
+  }
+
+  function openPassage() {
+    if (state.passageOpen) {
+      closePassage();
+      return;
+    }
+    if (state.mode !== 'normal') {
+      toast('先回到普通练习再打开课文');
+      return;
+    }
+    if (state.reviewMode) returnToCurrent();
+    if (state.browseOpen) {
+      state.browseOpen = false;
+      els.browseView.hidden = true;
+      document.body.classList.remove('browse-open');
+      els.btnBrowse.classList.remove('active');
+    }
+
+    state.prePassageMode = state.mode;
+    state.passageOpen = true;
+    els.quizView.hidden = true;
+    els.cardView.hidden = true;
+    els.browseView.hidden = true;
+    els.reviewView.hidden = true;
+    els.passageView.hidden = false;
+    document.body.classList.add('passage-open');
+    document.body.classList.remove('browse-open');
+    document.body.classList.remove('review-open');
+    document.body.classList.remove('cards-mode');
+    els.btnPassage.classList.add('active');
+    els.btnBrowse.classList.remove('active');
+    renderPassage();
+    updateFooterHint();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function closePassage() {
+    if (!state.passageOpen) return;
+    state.passageOpen = false;
+    els.passageView.hidden = true;
+    document.body.classList.remove('passage-open');
+    els.btnPassage.classList.remove('active');
+
+    if (state.pendingRestart) {
+      state.pendingRestart = false;
+      restartForSelection();
+      return;
+    }
+
+    els.quizView.hidden = false;
+    els.cardView.hidden = true;
+    els.browseView.hidden = true;
+    els.reviewView.hidden = true;
+    requestAnimationFrame(fitWordDisplay);
+    updateFooterHint();
+    updatePrevButton();
+  }
+
+  function checkPassage() {
+    const wrappers = Array.from(els.passageContent.querySelectorAll('.passage-blank'));
+    if (!wrappers.length) return;
+
+    let correct = 0;
+    wrappers.forEach(wrapper => {
+      const index = Number(wrapper.dataset.index);
+      const target = state.passageTargets[index];
+      const input = wrapper.querySelector('.passage-input');
+      if (!target || !input) return;
+
+      const answer = wrapper.querySelector('.passage-answer');
+      const normalized = normalizeAnswer(input.value);
+      const ok = !!normalized && target.accepted.some(item => normalizeAnswer(item) === normalized);
+
+      wrapper.classList.remove('correct', 'wrong');
+      wrapper.classList.add(ok ? 'correct' : 'wrong');
+      if (ok) {
+        correct++;
+        answer.hidden = true;
+        answer.textContent = '';
+      } else {
+        answer.hidden = false;
+        answer.textContent = `→ ${target.surface}`;
+      }
+    });
+
+    els.passageScore.textContent = `答对 ${correct} / ${wrappers.length}${correct === wrappers.length ? ' 🎉' : ''}`;
+    els.passageScore.classList.toggle('good', correct === wrappers.length);
+    els.passageScore.classList.toggle('bad', correct < wrappers.length);
+  }
+
+  function retryPassage() {
+    if (state.passageModule === 'read') return;
+    renderPassage();
+    const first = els.passageContent.querySelector('.passage-input');
+    if (first) first.focus();
   }
 
   /* =========================================================
@@ -2494,7 +2990,7 @@
     const html = `
       <section class="settings-section">
         <h3>学习偏好</h3>
-        ${switchRow('autoSpeak', '自动发音', '切换到英文题时自动朗读单词')}
+        ${switchRow('autoSpeak', '自动发音', '英文→中文、听音拼写和翻卡时自动朗读（不会提前读答案）')}
         ${switchRow('sound', '音效', '答对 / 答错时的提示音')}
         ${switchRow('hideExamples', '答题提示', '隐藏 synonym 和例句，只看生字作答')}
         <div class="setting-row">
@@ -2539,7 +3035,7 @@
           <summary>怎么用？快捷键和导入格式</summary>
           <div class="help-body">
             <p><strong>选择单元</strong> → 选题型和范围 → 开始答题。普通练习里每个词要连续答对 2 次才算完成；点「✓ 学会了」可直接完成，点「✗ 还没记住」会记进错题本。</p>
-            <p><strong>范围：</strong>前一半 / 后一半按当前单元的顺序切分；「只复习错题」和「只复习难词」会自动筛选；「翻卡自测」是另一套翻卡界面。</p>
+            <p><strong>范围：</strong>「自定义范围」可以输入第几到第几（如 1–10、1–20）；「只复习错题」和「只复习难词」会自动筛选；「翻卡自测」是另一套翻卡界面。</p>
             <p><strong>快捷键：</strong>1–4 选答案 · Enter 下一题 · ← 上一题 · S 发音 · H 标记难词 · 翻卡时空格翻面、1 没记住、2 学会了。</p>
             <p><strong>导入单元：</strong>每行一个词，最少写「英文,中文」；完整格式为「word,pos,synonym,中文,例句,例句翻译」，也可以直接粘贴「word (pos.)｜synonym: …｜中文：…」格式。</p>
             <p><strong>数据：</strong>所有记录只保存在这台设备的浏览器 localStorage 中，不会上传到服务器。清除浏览器数据会丢失进度，记得导出备份。</p>
@@ -2578,7 +3074,7 @@
           <li>中间答错一次，连续次数清零，这个词会再次排到后面。</li>
           <li>点「✓ 学会了」可以直接完成这个词：不用等第二次，本轮后面也不会再出现。</li>
           <li>点「✗ 还没记住」会把它记进错题本，并让它本轮继续出现。</li>
-          <li>按「← 上一题」可以退回上一题重新作答，分数和完成状态会一起回退。</li>
+          <li>按「← 上一题」可以查看上一题的作答结果，不会重新做；按「→」返回当前题。</li>
         </ul>
         <p class="help-tip">速通（⚡）和翻卡（🃏）是另外的玩法，不受“连续答对 2 次”限制。得分和正确率统计每次作答；剩余数量统计还没完成的词。</p>
       </div>
@@ -3253,6 +3749,7 @@
     });
 
     els.btnWrongBook.addEventListener('click', openWrongBook);
+    els.btnPassage.addEventListener('click', openPassage);
     els.btnSettings.addEventListener('click', openSettings);
 
     els.btnSpeed.addEventListener('click', () => {
@@ -3281,7 +3778,10 @@
       syncControls();
       updateBrand();
 
-      if (state.browseOpen) {
+      if (state.passageOpen) {
+        state.pendingRestart = true;
+        renderPassage();
+      } else if (state.browseOpen) {
         state.pendingRestart = true;
         renderBrowse();
       } else if (state.mode === 'cards') {
@@ -3319,6 +3819,16 @@
       saveSettings();
       if (settings.scope === 'cards') startCards();
       else startSession();
+    });
+
+    els.btnApplyRange.addEventListener('click', applyRange);
+    [els.rangeStart, els.rangeEnd].forEach(input => {
+      input.addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          applyRange();
+        }
+      });
     });
 
     els.btnSpeak.addEventListener('click', () => {
@@ -3380,7 +3890,14 @@
 
     els.btnFinishBrowse.addEventListener('click', openBrowse);
 
-    els.btnPrev.addEventListener('click', goToPreviousQuestion);
+    els.btnPrev.addEventListener('click', goBackReview);
+    els.btnReviewEarlier.addEventListener('click', goBackReview);
+    els.btnReturnCurrent.addEventListener('click', returnToCurrent);
+    els.btnReturnCurrent2.addEventListener('click', returnToCurrent);
+    els.reviewSpeak.addEventListener('click', () => {
+      const record = state.answerHistory[state.reviewIndex];
+      if (record) speak(record.word.word);
+    });
 
     els.btnRestart.addEventListener('click', () => {
       if (state.mode === 'cards') startCards();
@@ -3395,6 +3912,16 @@
       renderBrowse(false);
     });
     els.browseList.addEventListener('click', handleBrowseClick);
+
+    els.btnClosePassage.addEventListener('click', closePassage);
+    els.btnCheckPassage.addEventListener('click', checkPassage);
+    els.btnRetryPassage.addEventListener('click', retryPassage);
+    els.passageTabs.addEventListener('click', event => {
+      const button = event.target.closest('[data-passage-module]');
+      if (!button) return;
+      state.passageModule = button.dataset.passageModule;
+      renderPassage();
+    });
 
     els.flipCard.addEventListener('click', event => {
       if (event.target.closest('button')) return;
@@ -3542,6 +4069,16 @@
         closeBrowse();
         return;
       }
+      if (state.passageOpen) {
+        event.preventDefault();
+        closePassage();
+        return;
+      }
+      if (state.reviewMode) {
+        event.preventDefault();
+        returnToCurrent();
+        return;
+      }
       return;
     }
 
@@ -3555,6 +4092,19 @@
       if (event.key === '/') {
         event.preventDefault();
         els.browseSearch.focus();
+      }
+      return;
+    }
+
+    if (state.passageOpen) return;
+
+    if (state.reviewMode) {
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        goBackReview();
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        returnToCurrent();
       }
       return;
     }
@@ -3578,9 +4128,9 @@
     }
 
     if (event.key === 'ArrowLeft') {
-      if (state.mode === 'normal' && !state.isEmpty && state.history.length) {
+      if (state.mode === 'normal' && !state.isEmpty && previousReviewIndex() >= 0) {
         event.preventDefault();
-        goToPreviousQuestion();
+        goBackReview();
       }
       return;
     }

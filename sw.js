@@ -1,10 +1,11 @@
-const CACHE_NAME = 'ben-gege-app-v1';
+const CACHE_NAME = 'ben-gege-app-v2';
 const APP_SHELL = [
   './',
   './index.html',
   './style.css',
   './app.js',
   './data/units.js',
+  './data/passages.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
